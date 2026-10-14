@@ -21,8 +21,15 @@ from simulador.dominio.compra_dolares import (
     dolares_obtenidos,
     precio_efectivo,
 )
+from simulador.dominio.cuotas import (
+    precio_de_contado,
+    tasa_de_equilibrio,
+    tasa_mensual_de_tna,
+    tna_de_tasa_mensual,
+    valor_presente_de_cuotas,
+)
 from simulador.dominio.estrategias import Resultado, simular_dolar, simular_plazo_fijo
-from simulador.formato import nombre_mes
+from simulador.formato import nombre_mes, pct
 from simulador.ingesta.dolar import (
     Cotizacion,
     CotizacionActual,
@@ -358,3 +365,107 @@ def comprar_dolares(pesos: float, comision_broker: float = 0.0) -> CompraDeDolar
         for canal, cotizacion, cargos, efectivo, dolares, dia in armadas
     )
     return CompraDeDolares(pesos, opciones, tuple(sin_cotizacion), REGLAS_RELEVADAS)
+
+
+@dataclass(frozen=True)
+class EscenarioCuotas:
+    nombre: str  # a qué se compara el rendimiento de tu plata (plazo fijo, inflación)
+    tasa_mensual: float
+    valor_presente: float  # cuánto valen hoy las cuotas descontadas a esa tasa
+    ahorro: float  # precio de contado menos valor presente: positivo si convienen las cuotas
+
+    @property
+    def mejor(self) -> str:
+        if abs(self.ahorro) < 0.005:
+            return "Da lo mismo"
+        return "En cuotas" if self.ahorro > 0 else "De contado"
+
+
+@dataclass(frozen=True)
+class ComparacionCuotas:
+    precio_lista: float  # precio pagando en cuotas
+    cuotas: int
+    valor_cuota: float
+    descuento: float  # proporción: 0,10 es un 10 % de descuento por pagar de contado
+    precio_contado: float
+    tasa_equilibrio: float  # tasa mensual a la que da lo mismo una opción que la otra
+    tna_equivalente: float
+    plazo_fijo: EscenarioCuotas
+    inflacion: EscenarioCuotas | None
+    aviso: str | None = None
+
+    @property
+    def mejor(self) -> str:
+        """Opción que conviene si tu plata queda en el plazo fijo."""
+        return self.plazo_fijo.mejor
+
+
+def comparar_contado_y_cuotas(
+    precio: float,
+    cuotas: int,
+    tna: float,
+    descuento: float = 0.0,
+    inflacion_mensual: float | None = None,
+) -> ComparacionCuotas:
+    """¿Conviene pagar de contado o en cuotas sin interés?
+
+    `precio` es el precio en cuotas (el de lista). `descuento` y `tna` van en
+    porcentaje. Si no se indica `inflacion_mensual`, se usa la del último mes
+    publicado por el INDEC; si no se puede obtener, se omite esa comparación.
+    """
+    if tna < 0:
+        raise ErrorSimulador("La tasa no puede ser negativa")
+    if inflacion_mensual is not None and inflacion_mensual <= -100:
+        raise ErrorSimulador("La inflación mensual debe ser mayor que -100 %")
+    try:
+        contado = precio_de_contado(precio, descuento / 100)
+        equilibrio = tasa_de_equilibrio(precio, cuotas, descuento / 100)
+        tasa_pf = tasa_mensual_de_tna(tna / 100)
+        plazo_fijo_ = _escenario_cuotas(f"Plazo fijo (TNA {pct(tna / 100)})", tasa_pf, precio, cuotas, contado)
+
+        aviso = None
+        inflacion = None
+        if inflacion_mensual is not None:
+            inflacion = _escenario_cuotas(
+                f"Inflación ingresada ({pct(inflacion_mensual / 100)} por mes)",
+                inflacion_mensual / 100,
+                precio,
+                cuotas,
+                contado,
+            )
+        else:
+            try:
+                dato = consultar_inflacion_mes()
+            except ErrorSimulador:
+                aviso = "No se pudo obtener la inflación del INDEC, así que se omite esa comparación."
+            else:
+                aviso = dato.aviso
+                inflacion = _escenario_cuotas(
+                    f"Inflación de {nombre_mes(dato.mes)} ({pct(dato.variacion)} por mes)",
+                    dato.variacion,
+                    precio,
+                    cuotas,
+                    contado,
+                )
+    except ValueError as error:
+        raise ErrorSimulador(str(error)) from error
+
+    return ComparacionCuotas(
+        precio_lista=precio,
+        cuotas=int(cuotas),
+        valor_cuota=precio / cuotas,
+        descuento=descuento / 100,
+        precio_contado=contado,
+        tasa_equilibrio=equilibrio,
+        tna_equivalente=tna_de_tasa_mensual(equilibrio),
+        plazo_fijo=plazo_fijo_,
+        inflacion=inflacion,
+        aviso=aviso,
+    )
+
+
+def _escenario_cuotas(
+    nombre: str, tasa_mensual: float, precio: float, cuotas: int, contado: float
+) -> EscenarioCuotas:
+    valor_presente = valor_presente_de_cuotas(precio, cuotas, tasa_mensual)
+    return EscenarioCuotas(nombre, tasa_mensual, valor_presente, contado - valor_presente)

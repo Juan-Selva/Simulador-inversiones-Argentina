@@ -37,3 +37,14 @@ def test_parsear_entero():
 def test_parsear_entero_rechaza_decimales():
     with pytest.raises(ValueError, match="entero"):
         parsear_entero("6,5")
+
+
+def test_parsear_numero_opcional_vacio_es_none():
+    from simulador.interfaz.entradas import parsear_numero_opcional
+
+    assert parsear_numero_opcional("") is None
+    assert parsear_numero_opcional("   ") is None
+    assert parsear_numero_opcional("10") == 10
+    assert parsear_numero_opcional("2,5 %") == pytest.approx(2.5)
+    with pytest.raises(ValueError):
+        parsear_numero_opcional("abc")

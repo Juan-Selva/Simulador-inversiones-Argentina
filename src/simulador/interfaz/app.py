@@ -19,10 +19,10 @@ except ImportError as error:  # pragma: no cover
         'Falta customtkinter. Instalalo con: pip install -e ".[gui]"'
     ) from error
 
-from simulador import servicio
+from simulador import preferencias, servicio
 from simulador.formato import MESES
 from simulador.interfaz import vistas
-from simulador.interfaz.entradas import parsear_entero, parsear_numero
+from simulador.interfaz.entradas import parsear_entero, parsear_numero, parsear_numero_opcional
 from simulador.servicio import ErrorSimulador
 
 # (modo claro, modo oscuro)
@@ -31,6 +31,13 @@ TONOS = {
     "negativo": ("#cf222e", "#ff7b72"),
     "suave": ("gray35", "gray65"),
 }
+
+
+# Tamaño de los botones de las secciones (pestañas).
+BOTON_SECCION_ALTO = 36
+BOTON_SECCION_ANCHO = 138
+BOTON_SECCION_SEPARACION = 5
+BOTON_SECCION_LETRA = 14
 
 
 def _tono(tono: str) -> dict:
@@ -155,9 +162,11 @@ def _tabla(marco, cabecera: list[str], filas) -> None:
 class App(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
+        self._modo = preferencias.cargar_modo()
+        ctk.set_appearance_mode(self._modo)
         self.title("Simulador de inversiones")
         self.geometry("940x740")
-        self.minsize(820, 660)
+        self.minsize(860, 660)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
@@ -166,15 +175,36 @@ class App(ctk.CTk):
 
         self._tabs = ctk.CTkTabview(self)
         self._tabs.grid(row=1, column=0, padx=16, pady=(8, 16), sticky="nsew")
-        for nombre in ("Comparar", "Plazo fijo", "Comprar dólares", "Inflación"):
+        for nombre in ("Comparar", "Plazo fijo", "Comprar dólares", "Contado o cuotas", "Inflación"):
             self._tabs.add(nombre)
+        self._ajustar_botones_de_secciones()
         self._construir_tab_comparar()
         self._construir_tab_plazo_fijo()
         self._construir_tab_comprar()
+        self._construir_tab_cuotas()
         self._construir_tab_inflacion()
         self._tabs.set("Comparar")
 
         self._actualizar_blue()
+
+    def _ajustar_botones_de_secciones(self) -> None:
+        """Botones de las secciones más grandes y más separados entre sí.
+
+        CTkTabview no deja configurar esto desde afuera, así que se ajusta su barra interna. Es solo
+        estética: si una versión futura de CustomTkinter cambia esos nombres internos, quedan los
+        botones por defecto y todo lo demás sigue funcionando.
+        """
+        try:
+            barra = self._tabs._segmented_button
+            barra.configure(
+                height=BOTON_SECCION_ALTO,
+                border_width=BOTON_SECCION_SEPARACION,
+                font=ctk.CTkFont(size=BOTON_SECCION_LETRA, weight="bold"),
+            )
+            for boton in barra._buttons_dict.values():
+                boton.configure(width=BOTON_SECCION_ANCHO)
+        except (AttributeError, ValueError):
+            pass
 
     # -- utilidades comunes
 
@@ -210,18 +240,24 @@ class App(ctk.CTk):
         cabecera.grid(row=0, column=0, padx=16, pady=(16, 8), sticky="ew")
         cabecera.grid_columnconfigure(0, weight=1)
 
+        self._selector_tema = ctk.CTkSegmentedButton(
+            cabecera, values=list(vistas.TEMAS), command=self._cambiar_tema, font=ctk.CTkFont(size=16), width=70
+        )
+        self._selector_tema.set(vistas.etiqueta_de_tema(ctk.get_appearance_mode().lower()))
+        self._selector_tema.grid(row=0, column=0, padx=16, pady=(12, 0), sticky="w")
+
         ctk.CTkLabel(
             cabecera, text="Simulador de inversiones", font=ctk.CTkFont(size=22, weight="bold"), anchor="w"
-        ).grid(row=0, column=0, padx=16, pady=(12, 0), sticky="w")
+        ).grid(row=1, column=0, padx=16, pady=(6, 0), sticky="w")
         ctk.CTkLabel(
             cabecera,
             text="Plazo fijo y dólar blue contra la inflación real del INDEC",
             anchor="w",
             **_tono("suave"),
-        ).grid(row=1, column=0, padx=16, pady=(0, 12), sticky="w")
+        ).grid(row=2, column=0, padx=16, pady=(0, 12), sticky="w")
 
         blue = ctk.CTkFrame(cabecera, fg_color="transparent")
-        blue.grid(row=0, column=1, rowspan=2, padx=16, pady=8, sticky="e")
+        blue.grid(row=0, column=1, rowspan=3, padx=16, pady=8, sticky="e")
         ctk.CTkLabel(blue, text="Dólar blue", font=ctk.CTkFont(weight="bold"), anchor="e").grid(
             row=0, column=0, sticky="e"
         )
@@ -231,6 +267,11 @@ class App(ctk.CTk):
         self._blue_detalle.grid(row=2, column=0, sticky="e")
         self._blue_boton = ctk.CTkButton(blue, text="Actualizar", width=90, command=self._actualizar_blue)
         self._blue_boton.grid(row=0, column=1, rowspan=3, padx=(14, 0))
+
+    def _cambiar_tema(self, etiqueta: str) -> None:
+        self._modo = vistas.TEMAS[etiqueta]
+        ctk.set_appearance_mode(self._modo)
+        preferencias.guardar_modo(self._modo)
 
     def _actualizar_blue(self) -> None:
         self._blue_boton.configure(state="disabled")
@@ -415,6 +456,62 @@ class App(ctk.CTk):
         for texto in vistas.pie_compra(c):
             _linea(marco, texto, tono="suave")
 
+    # -- pestaña Contado o cuotas
+
+    def _construir_tab_cuotas(self) -> None:
+        tab = self._tabs.tab("Contado o cuotas")
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(2, weight=1)
+        ctk.CTkLabel(
+            tab,
+            text=(
+                "¿Conviene pagar de contado o en cuotas sin interés? Se comparan en pesos de hoy, según lo que "
+                "rinda tu plata. Si dejás vacía la inflación, se usa la del último mes publicado por el INDEC."
+            ),
+            wraplength=780,
+            justify="left",
+            anchor="w",
+            **_tono("suave"),
+        ).grid(row=0, column=0, sticky="ew", pady=(0, 8))
+
+        formulario = ctk.CTkFrame(tab, fg_color="transparent")
+        formulario.grid(row=1, column=0, sticky="w", pady=(0, 8))
+        self._cq_precio = _campo(formulario, 0, "Precio en cuotas ($)", "120.000")
+        self._cq_cuotas = _campo(formulario, 1, "Cuotas", "6", ancho=80)
+        self._cq_descuento = _campo(formulario, 2, "Descuento de contado (%, opcional)", "", ancho=100)
+        self._cq_tna = _campo(formulario, 0, "TNA del plazo fijo (%)", "35", ancho=100, fila=1)
+        self._cq_inflacion = _campo(formulario, 1, "Inflación mensual (%, opcional)", "", ancho=100, fila=1)
+        self._cq_boton = ctk.CTkButton(formulario, text="Calcular", command=self._calcular_cuotas)
+        self._cq_boton.grid(row=1, column=2, pady=(0, 6), sticky="sw")
+
+        self._cq_resultado = ctk.CTkScrollableFrame(tab)
+        self._cq_resultado.grid(row=2, column=0, sticky="nsew")
+
+    def _calcular_cuotas(self) -> None:
+        try:
+            precio = parsear_numero(self._cq_precio.get())
+            cuotas = parsear_entero(self._cq_cuotas.get())
+            tna = parsear_numero(self._cq_tna.get())
+            descuento = parsear_numero_opcional(self._cq_descuento.get()) or 0.0
+            inflacion = parsear_numero_opcional(self._cq_inflacion.get())
+        except ValueError as error:
+            _mensaje(self._cq_resultado, str(error), tono="negativo")
+            return
+        self._lanzar(
+            [self._cq_boton],
+            self._cq_resultado,
+            lambda: servicio.comparar_contado_y_cuotas(precio, cuotas, tna, descuento, inflacion),
+            self._mostrar_cuotas,
+        )
+
+    def _mostrar_cuotas(self, c) -> None:
+        marco = self._cq_resultado
+        _linea(marco, vistas.veredicto_cuotas(c), negrita=True, tamanio=15)
+        _clave_valor(marco, vistas.filas_cuotas(c))
+        _tabla(marco, vistas.CABECERA_CUOTAS, vistas.filas_escenarios_cuotas(c))
+        for nota in vistas.notas_cuotas(c):
+            _linea(marco, nota, tono="suave")
+
     # -- pestaña Inflación
 
     def _construir_tab_inflacion(self) -> None:
@@ -496,7 +593,6 @@ class App(ctk.CTk):
 
 
 def main() -> None:
-    ctk.set_appearance_mode("system")
     ctk.set_default_color_theme("blue")
     App().mainloop()
 

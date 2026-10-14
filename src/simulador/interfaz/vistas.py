@@ -12,6 +12,8 @@ from simulador.dominio.estrategias import inflacion_acumulada
 from simulador.formato import (
     AVISO_BLUE_DESACTUALIZADO,
     AVISO_COTIZACIONES,
+    NOTA_SIN_DESCUENTO,
+    SUPUESTOS_CUOTAS,
     aviso_normas,
     detalle_actualizacion,
     dolares,
@@ -21,6 +23,7 @@ from simulador.formato import (
 )
 from simulador.servicio import (
     Comparacion,
+    ComparacionCuotas,
     CompraDeDolares,
     DolarHoy,
     InflacionDeUnMes,
@@ -178,3 +181,76 @@ def pie_compra(c: CompraDeDolares) -> list[str]:
     if c.sin_cotizacion:
         lineas.append("Sin cotización de la fuente para: " + ", ".join(c.sin_cotizacion) + ".")
     return lineas
+
+
+# Íconos del selector de tema (sol y luna) y el modo que entiende la interfaz.
+# Son símbolos simples que se dibujan con cualquier fuente del sistema.
+TEMAS = {"☀": "light", "☾": "dark"}
+
+
+def etiqueta_de_tema(modo: str) -> str:
+    """'dark' -> '☾'. Un modo que no es ni claro ni oscuro se muestra como claro."""
+    for etiqueta, valor in TEMAS.items():
+        if valor == modo:
+            return etiqueta
+    return next(iter(TEMAS))
+
+
+# --- contado o cuotas ---------------------------------------------------------
+
+CABECERA_CUOTAS = ["Si tu plata rinde como", "Las cuotas valen hoy", "Conviene"]
+
+
+def filas_cuotas(c: ComparacionCuotas) -> list[tuple[str, Celda]]:
+    filas = [
+        ("Precio en cuotas", Celda(pesos(c.precio_lista))),
+        ("Cuotas", Celda(f"{c.cuotas} de {pesos(c.valor_cuota)}")),
+    ]
+    if c.descuento > 0:
+        filas.append(("Precio de contado", Celda(f"{pesos(c.precio_contado)} ({pct(c.descuento)} de descuento)")))
+        filas.append(
+            (
+                "Pagar en cuotas equivale a un crédito al",
+                Celda(f"{pct(c.tasa_equilibrio)} por mes (TNA {pct(c.tna_equivalente)})"),
+            )
+        )
+    else:
+        filas.append(("Precio de contado", Celda(f"{pesos(c.precio_contado)} (sin descuento)")))
+    return filas
+
+
+def _conviene(escenario) -> str:
+    if escenario.mejor == "En cuotas":
+        return f"En cuotas (ahorrás {pesos(escenario.ahorro)})"
+    if escenario.mejor == "De contado":
+        return f"De contado (ahorrás {pesos(-escenario.ahorro)})"
+    return "Da lo mismo"
+
+
+def filas_escenarios_cuotas(c: ComparacionCuotas) -> list[list[Celda]]:
+    escenarios = [c.plazo_fijo] + ([c.inflacion] if c.inflacion else [])
+    return [
+        [Celda(e.nombre), Celda(pesos(e.valor_presente)), Celda(_conviene(e))] for e in escenarios
+    ]
+
+
+def veredicto_cuotas(c: ComparacionCuotas) -> str:
+    e = c.plazo_fijo
+    if e.mejor == "En cuotas":
+        return f"Conviene pagar en cuotas: con tu plata en el plazo fijo ahorrás {pesos(e.ahorro)} en pesos de hoy."
+    if e.mejor == "De contado":
+        return (
+            f"Conviene pagar de contado: ahorrás {pesos(-e.ahorro)} en pesos de hoy "
+            "frente a dejar la plata en el plazo fijo."
+        )
+    return "Da lo mismo pagar de contado o en cuotas si tu plata queda en el plazo fijo."
+
+
+def notas_cuotas(c: ComparacionCuotas) -> list[str]:
+    notas = []
+    if c.descuento == 0:
+        notas.append(NOTA_SIN_DESCUENTO)
+    notas.append(SUPUESTOS_CUOTAS)
+    if c.aviso:
+        notas.append(c.aviso)
+    return notas

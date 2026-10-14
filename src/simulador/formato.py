@@ -55,3 +55,15 @@ def aviso_normas(fecha: str) -> str:
         f"Normas e impuestos relevados al {fecha}: verificalos antes de operar. "
         "No es asesoramiento financiero ni impositivo."
     )
+
+
+NOTA_SIN_DESCUENTO = (
+    "Sin descuento por pagar de contado, las cuotas sin interés siempre convienen: "
+    "pagás lo mismo, pero más tarde."
+)
+
+SUPUESTOS_CUOTAS = (
+    "Supone que la primera cuota se paga a los 30 días y las demás una por mes, y que la plata que no gastás "
+    "hoy rinde la tasa indicada. Los montos están en pesos de hoy y no incluyen comisiones ni intereses por "
+    "pagar tarde el resumen de la tarjeta."
+)

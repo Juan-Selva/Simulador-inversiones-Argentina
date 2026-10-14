@@ -38,3 +38,10 @@ def parsear_entero(texto: str) -> int:
     if valor != int(valor):
         raise ValueError(f"'{texto.strip()}' tiene que ser un número entero")
     return int(valor)
+
+
+def parsear_numero_opcional(texto: str) -> float | None:
+    """Como parsear_numero, pero un campo vacío es None (el dato es opcional)."""
+    if not texto.strip():
+        return None
+    return parsear_numero(texto)

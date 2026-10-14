@@ -223,3 +223,43 @@ def test_comprar_dolares_sin_red(monkeypatch):
     r = _invocar("comprar-dolares", "--pesos", "1000000")
     assert r.exit_code == 1
     assert "No se pudieron descargar las cotizaciones del dólar" in r.output
+
+
+# --- contado o cuotas --------------------------------------------------------
+
+def test_contado_o_cuotas_con_descuento(monkeypatch):
+    _parchear(monkeypatch, ipc=IPC_20_MESES)
+    r = _invocar("contado-o-cuotas", "--precio", "120000", "--cuotas", "6", "--tna", "35", "--descuento", "10")
+    assert r.exit_code == 0
+    assert "Precio de contado:  $ 108.000,00 (10,00 % de descuento)" in r.output
+    assert "Pagar en cuotas equivale a un crédito al 3,1" in r.output
+    assert "Plazo fijo (TNA 35,00 %)" in r.output
+    assert "conviene pagar de contado" in r.output
+    assert "Resultado con tu plazo fijo: De contado" in r.output
+    assert "Inflación de agosto de 2026 (2,00 % por mes)" in r.output
+
+
+def test_contado_o_cuotas_sin_descuento_aclara_que_las_cuotas_siempre_convienen(monkeypatch):
+    _parchear(monkeypatch, ipc=IPC_20_MESES)
+    r = _invocar("contado-o-cuotas", "--precio", "120000", "--cuotas", "6", "--tna", "35")
+    assert r.exit_code == 0
+    assert "(sin descuento)" in r.output
+    assert "siempre convienen" in r.output
+    assert "Resultado con tu plazo fijo: En cuotas" in r.output
+
+
+def test_contado_o_cuotas_con_inflacion_manual(monkeypatch):
+    _parchear(monkeypatch, ipc=IPC_20_MESES)
+    r = _invocar(
+        "contado-o-cuotas", "--precio", "120000", "--cuotas", "6", "--tna", "35",
+        "--descuento", "10", "--inflacion-mensual", "3",
+    )
+    assert r.exit_code == 0
+    assert "Inflación ingresada (3,00 % por mes)" in r.output
+
+
+def test_contado_o_cuotas_parametros_invalidos(monkeypatch):
+    _parchear(monkeypatch, ipc=IPC_20_MESES)
+    r = _invocar("contado-o-cuotas", "--precio", "120000", "--cuotas", "6", "--tna", "35", "--descuento", "100")
+    assert r.exit_code == 1
+    assert "descuento" in r.output

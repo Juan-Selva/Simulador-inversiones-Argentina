@@ -11,6 +11,8 @@ from simulador.dominio.estrategias import inflacion_acumulada
 from simulador.formato import (
     AVISO_BLUE_DESACTUALIZADO,
     AVISO_COTIZACIONES,
+    NOTA_SIN_DESCUENTO,
+    SUPUESTOS_CUOTAS,
     aviso_normas,
     detalle_actualizacion,
     dolares,
@@ -189,6 +191,50 @@ def comprar_dolares_cmd(
     typer.echo(aviso_normas(c.reglas_al))
     if c.sin_cotizacion:
         typer.echo("Sin cotización de la fuente para: " + ", ".join(c.sin_cotizacion) + ".")
+
+
+@app.command("contado-o-cuotas")
+def contado_o_cuotas_cmd(
+    precio: float = typer.Option(..., help="Precio del producto en cuotas (el de lista), en pesos"),
+    cuotas: int = typer.Option(..., help="Cantidad de cuotas sin interés"),
+    tna: float = typer.Option(..., help="TNA de tu plazo fijo, en porcentaje (ej: 35)"),
+    descuento: float = typer.Option(0.0, help="Descuento por pagar de contado, en porcentaje (opcional)"),
+    inflacion_mensual: Optional[float] = typer.Option(
+        None,
+        help="Inflación mensual esperada, en porcentaje. Si se omite, usa la del último mes publicado por el INDEC.",
+    ),
+) -> None:
+    """Calcula si conviene pagar de contado o en cuotas sin interés."""
+    c = _ejecutar(lambda: servicio.comparar_contado_y_cuotas(precio, cuotas, tna, descuento, inflacion_mensual))
+
+    typer.echo(f"Precio en cuotas:   {pesos(c.precio_lista)}")
+    typer.echo(f"Cuotas:             {c.cuotas} de {pesos(c.valor_cuota)}")
+    if c.descuento > 0:
+        typer.echo(f"Precio de contado:  {pesos(c.precio_contado)} ({pct(c.descuento)} de descuento)")
+        typer.echo(
+            f"Pagar en cuotas equivale a un crédito al {pct(c.tasa_equilibrio)} por mes "
+            f"(TNA {pct(c.tna_equivalente)})"
+        )
+    else:
+        typer.echo(f"Precio de contado:  {pesos(c.precio_contado)} (sin descuento)")
+    typer.echo("")
+    typer.echo("Valor de las cuotas hoy, según cómo rinda tu plata:")
+    for e in [c.plazo_fijo] + ([c.inflacion] if c.inflacion else []):
+        if e.mejor == "En cuotas":
+            conviene = f"conviene pagar en cuotas (ahorrás {pesos(e.ahorro)})"
+        elif e.mejor == "De contado":
+            conviene = f"conviene pagar de contado (ahorrás {pesos(-e.ahorro)})"
+        else:
+            conviene = "da lo mismo"
+        typer.echo(f"  {e.nombre}: {pesos(e.valor_presente)} -> {conviene}")
+    typer.echo("")
+    typer.echo(f"Resultado con tu plazo fijo: {c.mejor}")
+    typer.echo("")
+    if c.descuento == 0:
+        typer.echo(NOTA_SIN_DESCUENTO)
+    typer.echo(SUPUESTOS_CUOTAS)
+    if c.aviso:
+        typer.echo(c.aviso)
 
 
 if __name__ == "__main__":

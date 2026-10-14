@@ -299,3 +299,106 @@ def test_comprar_dolares_con_formato_inesperado(monkeypatch):
     monkeypatch.setattr(servicio, "descargar_cotizaciones_actuales", mal)
     with pytest.raises(ErrorSimulador, match="formato inesperado"):
         servicio.comprar_dolares(1_000_000)
+
+
+# --- contado o cuotas --------------------------------------------------------
+
+def _valor_presente_a_mano(cuota, n, m):
+    """Anualidad vencida: cuota * (1 - (1 + m) ** -n) / m, calculada aparte del código."""
+    return cuota * (1 - (1 + m) ** -n) / m
+
+
+def test_cuotas_con_descuento_grande_conviene_el_contado():
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10)
+    m = 0.35 * 30 / 365
+    esperado = _valor_presente_a_mano(20_000, 6, m)
+    assert c.precio_contado == pytest.approx(108_000)
+    assert c.valor_cuota == pytest.approx(20_000)
+    assert c.plazo_fijo.valor_presente == pytest.approx(esperado)
+    assert c.plazo_fijo.ahorro == pytest.approx(108_000 - esperado)
+    # Contrastado con un cálculo aparte: las cuotas valen hoy $ 108.787,95 y el contado ahorra $ 787,95.
+    assert c.plazo_fijo.valor_presente == pytest.approx(108_787.95, abs=0.01)
+    assert c.plazo_fijo.ahorro == pytest.approx(-787.95, abs=0.01)
+    assert c.mejor == "De contado"
+    assert c.descuento == pytest.approx(0.10)
+
+
+def test_cuotas_la_tasa_de_equilibrio_es_el_credito_implicito():
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10)
+    assert c.tasa_equilibrio == pytest.approx(0.03096, abs=1e-5)  # 3,10 % por mes
+    assert c.tna_equivalente * 100 == pytest.approx(37.668, abs=0.01)  # apenas arriba del 35 % del plazo fijo
+
+
+def test_cuotas_conviene_si_el_plazo_fijo_rinde_mas_que_el_equilibrio():
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=45, descuento=10)
+    assert c.mejor == "En cuotas"
+    assert c.plazo_fijo.ahorro > 0
+
+
+def test_cuotas_sin_descuento_las_cuotas_siempre_convienen():
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35)
+    assert c.precio_contado == 120_000
+    assert c.tasa_equilibrio == 0
+    assert c.mejor == "En cuotas"
+    assert c.plazo_fijo.ahorro == pytest.approx(120_000 - _valor_presente_a_mano(20_000, 6, 0.35 * 30 / 365))
+
+
+def test_cuotas_con_tna_cero_y_descuento_conviene_el_contado():
+    c = servicio.comparar_contado_y_cuotas(100_000, 3, tna=0, descuento=5)
+    assert c.plazo_fijo.valor_presente == pytest.approx(100_000)
+    assert c.plazo_fijo.ahorro == pytest.approx(-5_000)
+    assert c.mejor == "De contado"
+
+
+def test_cuotas_una_sola_cuota_con_tasa_exacta_da_lo_mismo():
+    # 1000 en un mes o 900 hoy equivale a 11,11 % mensual; un plazo fijo con esa tasa mensual empata.
+    tna = (1000 / 900 - 1) * 365 / 30 * 100
+    c = servicio.comparar_contado_y_cuotas(1000, 1, tna=tna, descuento=10)
+    assert c.mejor == "Da lo mismo"
+
+
+def test_cuotas_usa_la_inflacion_del_ultimo_mes_del_indec_por_defecto():
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10)  # hoy 13/10/2026: último dato, agosto
+    assert c.inflacion.nombre == "Inflación de agosto de 2026 (2,00 % por mes)"
+    assert c.inflacion.tasa_mensual == pytest.approx(0.02)
+    assert c.inflacion.valor_presente == pytest.approx(_valor_presente_a_mano(20_000, 6, 0.02))
+    assert "todavía no publicó" in c.aviso  # septiembre aún no salió
+
+
+def test_cuotas_con_inflacion_ingresada_no_consulta_al_indec(monkeypatch):
+    def no_deberia_llamarse(*a, **k):
+        raise AssertionError("no debería descargar el IPC")
+
+    monkeypatch.setattr(servicio, "descargar_serie", no_deberia_llamarse)
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10, inflacion_mensual=3)
+    assert c.inflacion.nombre == "Inflación ingresada (3,00 % por mes)"
+    assert c.inflacion.valor_presente == pytest.approx(_valor_presente_a_mano(20_000, 6, 0.03))
+    assert c.aviso is None
+
+
+def test_cuotas_sin_acceso_al_indec_omite_la_inflacion_y_sigue(monkeypatch):
+    def falla(serie_id, usar_cache=True):
+        raise httpx.ConnectError("sin conexión")
+
+    monkeypatch.setattr(servicio, "descargar_serie", falla)
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10)
+    assert c.inflacion is None
+    assert "se omite" in c.aviso
+    assert c.mejor == "De contado"
+
+
+@pytest.mark.parametrize(
+    "precio, cuotas, tna, descuento, inflacion",
+    [
+        (0, 6, 35, 0, None),
+        (-1, 6, 35, 0, None),
+        (1000, 0, 35, 0, None),
+        (1000, 6, -1, 0, None),
+        (1000, 6, 35, -5, None),
+        (1000, 6, 35, 100, None),
+        (1000, 6, 35, 0, -100),
+    ],
+)
+def test_cuotas_valida_los_parametros(precio, cuotas, tna, descuento, inflacion):
+    with pytest.raises(ErrorSimulador):
+        servicio.comparar_contado_y_cuotas(precio, cuotas, tna, descuento, inflacion)

@@ -56,6 +56,12 @@ simulador comprar-dolares --pesos 1000000
 
 # Lo mismo, sumando la comisión de tu broker para MEP y CCL (en porcentaje)
 simulador comprar-dolares --pesos 1000000 --comision-broker 0.3
+
+# ¿Contado o cuotas sin interés? (el descuento es opcional)
+simulador contado-o-cuotas --precio 120000 --cuotas 6 --tna 35 --descuento 10
+
+# Lo mismo, con una inflación mensual propia en lugar de la del INDEC
+simulador contado-o-cuotas --precio 120000 --cuotas 6 --tna 35 --descuento 10 --inflacion-mensual 3
 ```
 
 ## Interfaz gráfica
@@ -66,7 +72,9 @@ simulador-gui
 python -m simulador.interfaz.app
 ```
 
-Tiene cuatro pestañas (Comparar, Plazo fijo, Comprar dólares, Inflación) y muestra arriba el dólar blue de hoy, con un botón para actualizarlo. Las consultas a las APIs corren en segundo plano, así que la ventana no se congela. Los números se pueden escribir como `1.000.000` o `35,5`.
+Tiene cinco pestañas (Comparar, Plazo fijo, Comprar dólares, Contado o cuotas, Inflación) y muestra arriba el dólar blue de hoy, con un botón para actualizarlo. Las consultas a las APIs corren en segundo plano, así que la ventana no se congela. Los números se pueden escribir como `1.000.000` o `35,5`.
+
+Arriba a la izquierda hay un selector de tema con dos íconos, sol (modo claro) y luna (modo oscuro). La primera vez la ventana sigue el modo de tu sistema operativo; después se recuerda tu elección entre sesiones en `~/.config/simulador-inversiones/preferencias.json`.
 
 ## Tests
 
@@ -103,13 +111,27 @@ Las reglas impositivas están en `dominio/compra_dolares.py`, con la fecha en qu
 
 Fuentes de las normas: [ARCA, RG 5672 vía Ámbito](https://www.ambito.com/economia/dolar-ahorro-arca-oficializo-el-fin-la-percepcion-del-30-n6134275), [El Cronista sobre el dólar tarjeta](https://www.cronista.com/economia-politica/por-que-no-se-elimino-el-dolar-tarjeta-cuanto-recaudo-arca-en-lo-que-va-de-2026/), [Infobae sobre la Com. A 8336](https://www.infobae.com/economia/2025/09/29/nuevas-trabas-del-bcra-como-se-puede-comprar-dolar-oficial-y-mep-a-partir-de-hoy/), [AFCOMEX sobre la Com. A 8361](https://afcomex.com.ar/resumen-tecnico-comunicacion-a-8361-bcra/), [Rivet](https://rivet.fi/blog/como-comprar-dolares-argentina) y [dolar.net.ar](https://www.dolar.net.ar/2026/05/todo-lo-que-tenes-que-saber-sobre-la-compra.html).
 
+## Contado o cuotas
+
+Calcula si conviene pagar un producto de contado (con un descuento opcional) o en cuotas sin interés. Las cuotas con interés no se contemplan.
+
+La idea: pagar en cuotas te deja la plata en el bolsillo un tiempo más, y eso vale algo si tu plata rinde. Entonces se calcula cuánto valen hoy las cuotas, descontadas a lo que rinde tu plata (valor presente), y se compara con el precio de contado. Si las cuotas valen menos que el contado, convienen las cuotas; si valen más, conviene el contado.
+
+- **Plazo fijo:** es la comparación principal. Usa la TNA que ingreses, con la misma cuenta que el resto del simulador (TNA × 30/365 por mes).
+- **Inflación:** segunda lectura, para plata que solo mantiene su valor. Usa la inflación mensual que ingreses o, si la dejás vacía, la del último mes publicado por el INDEC (si no se puede descargar, se omite).
+- **Crédito implícito:** con descuento, también muestra a qué tasa mensual (y TNA) equivale renunciar al descuento. Si tu plata rinde más que eso, convienen las cuotas.
+- **Sin descuento**, las cuotas sin interés siempre convienen: pagás lo mismo, pero más tarde.
+
+Supuestos: la primera cuota se paga a los 30 días y las demás una por mes, todas de igual monto, y no se consideran comisiones ni intereses por pagar tarde el resumen de la tarjeta. La inflación del último mes es solo una referencia: la futura puede ser distinta.
+
 ## Estado y próximos pasos
 
 - [x] Plazo fijo (simple y renovado) con comparación contra inflación
 - [x] Inflación real del INDEC (IPC nacional) con caché de 24 h, por mes e interanual
 - [x] Estrategia dólar blue (compra y venta reales) y comando `comparar` contra plazo fijo
 - [x] Dólar blue de hoy en los resultados que involucran dólares
-- [x] Interfaz gráfica (CustomTkinter)
+- [x] Interfaz gráfica (CustomTkinter) con modo claro y oscuro
 - [x] Comprar dólares: oficial, MEP, CCL, blue, cripto y tarjeta, con impuestos
+- [x] Contado o cuotas sin interés, con descuento opcional
 - [ ] Estrategia UVA / CER
 - [ ] Persistencia en SQLite

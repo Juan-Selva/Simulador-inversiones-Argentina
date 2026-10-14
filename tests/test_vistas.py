@@ -146,3 +146,64 @@ def test_pie_compra_avisa_de_la_fuente_las_normas_y_lo_que_falte(monkeypatch):
     assert any("DolarAPI" in linea for linea in pie)
     assert any("relevados al 13/10/2026" in linea for linea in pie)
     assert pie[-1] == "Sin cotización de la fuente para: Dólar cripto (USDT)."
+
+
+# --- tema --------------------------------------------------------------------
+
+def test_temas_y_etiquetas_de_tema():
+    assert vistas.TEMAS == {"☀": "light", "☾": "dark"}
+    assert vistas.etiqueta_de_tema("dark") == "☾"
+    assert vistas.etiqueta_de_tema("light") == "☀"
+    assert vistas.etiqueta_de_tema("violeta") == "☀"
+    assert all(vistas.etiqueta_de_tema(modo) == etiqueta for etiqueta, modo in vistas.TEMAS.items())
+
+
+# --- contado o cuotas --------------------------------------------------------
+
+def test_filas_cuotas_con_descuento_muestran_el_credito_implicito():
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10)
+    filas = dict(vistas.filas_cuotas(c))
+    assert filas["Precio en cuotas"].texto == "$ 120.000,00"
+    assert filas["Cuotas"].texto == "6 de $ 20.000,00"
+    assert filas["Precio de contado"].texto == "$ 108.000,00 (10,00 % de descuento)"
+    assert filas["Pagar en cuotas equivale a un crédito al"].texto == "3,10 % por mes (TNA 37,67 %)"
+
+
+def test_filas_cuotas_sin_descuento_no_muestra_el_credito_implicito():
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35)
+    filas = dict(vistas.filas_cuotas(c))
+    assert filas["Precio de contado"].texto == "$ 120.000,00 (sin descuento)"
+    assert "Pagar en cuotas equivale a un crédito al" not in filas
+
+
+def test_escenarios_cuotas_dicen_que_conviene_en_cada_caso():
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10)
+    plazo_fijo, inflacion = vistas.filas_escenarios_cuotas(c)
+    assert plazo_fijo[0].texto == "Plazo fijo (TNA 35,00 %)"
+    assert plazo_fijo[2].texto == "De contado (ahorrás $ 787,95)"
+    assert inflacion[0].texto == "Inflación de julio de 2026 (3,00 % por mes)"  # esta batería usa el IPC de 7 meses
+    assert inflacion[2].texto.startswith("De contado")
+
+
+def test_escenarios_cuotas_sin_inflacion_solo_trae_el_plazo_fijo(monkeypatch):
+    c = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10, inflacion_mensual=None)
+    c = servicio.ComparacionCuotas(**{**c.__dict__, "inflacion": None})
+    assert len(vistas.filas_escenarios_cuotas(c)) == 1
+
+
+def test_veredicto_cuotas_en_los_tres_casos():
+    contado = servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10)
+    cuotas = servicio.comparar_contado_y_cuotas(120_000, 6, tna=45, descuento=10)
+    empate = servicio.comparar_contado_y_cuotas(1000, 1, tna=(1000 / 900 - 1) * 365 / 30 * 100, descuento=10)
+    assert vistas.veredicto_cuotas(contado).startswith("Conviene pagar de contado: ahorrás $ 787,95")
+    assert vistas.veredicto_cuotas(cuotas).startswith("Conviene pagar en cuotas")
+    assert vistas.veredicto_cuotas(empate).startswith("Da lo mismo")
+
+
+def test_notas_cuotas_avisan_cuando_no_hay_descuento_y_del_aviso_del_indec():
+    sin = vistas.notas_cuotas(servicio.comparar_contado_y_cuotas(120_000, 6, tna=35))
+    con = vistas.notas_cuotas(servicio.comparar_contado_y_cuotas(120_000, 6, tna=35, descuento=10))
+    assert any("siempre convienen" in nota for nota in sin)
+    assert not any("siempre convienen" in nota for nota in con)
+    assert any("primera cuota se paga a los 30 días" in nota for nota in con)
+    assert any("todavía no publicó" in nota for nota in con)
