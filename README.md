@@ -1,5 +1,7 @@
 # Simulador de inversiones
 
+[![Tests](https://github.com/JuaniSelva/Simulador-Inversiones/actions/workflows/tests.yml/badge.svg)](https://github.com/JuaniSelva/Simulador-Inversiones/actions/workflows/tests.yml)
+
 Simulador en Python que compara estrategias de inversión (plazo fijo y dólar blue) contra la inflación argentina, para ver el rendimiento real y no solo el nominal. Usa datos reales: IPC del INDEC (datos.gob.ar) y dólar blue (ArgentinaDatos).
 
 ## Estructura
