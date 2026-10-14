@@ -9,6 +9,7 @@ from datos_de_prueba import (
     blue_actual,
     cotizaciones_actuales,
     cotizaciones_blue,
+    uva_diaria,
 )
 
 from simulador import servicio
@@ -24,6 +25,7 @@ def datos_por_defecto(monkeypatch):
     monkeypatch.setattr(servicio, "descargar_blue", lambda usar_cache=True: cotizaciones_blue())
     monkeypatch.setattr(servicio, "descargar_blue_actual", lambda: blue_actual())
     monkeypatch.setattr(servicio, "descargar_cotizaciones_actuales", lambda: cotizaciones_actuales())
+    monkeypatch.setattr(servicio, "descargar_uva", lambda usar_cache=True: uva_diaria())
 
 
 def _con_ipc_de_7_meses(monkeypatch):
@@ -176,6 +178,7 @@ def test_comparar_gana_el_plazo_fijo_si_el_dolar_pierde(monkeypatch):
     _con_ipc_de_7_meses(monkeypatch)
     quieto = [(f"2026-{m:02d}-28", 1000.0, 1020.0) for m in range(1, 8)]
     monkeypatch.setattr(servicio, "descargar_blue", lambda usar_cache=True: quieto)
+    monkeypatch.setattr(servicio, "descargar_uva", lambda usar_cache=True: uva_diaria(crecimiento=0.0))
     assert servicio.comparar_estrategias(1_000_000, 35, 6).mejor == "Plazo fijo"
 
 
@@ -402,3 +405,50 @@ def test_cuotas_sin_acceso_al_indec_omite_la_inflacion_y_sigue(monkeypatch):
 def test_cuotas_valida_los_parametros(precio, cuotas, tna, descuento, inflacion):
     with pytest.raises(ErrorSimulador):
         servicio.comparar_contado_y_cuotas(precio, cuotas, tna, descuento, inflacion)
+
+
+# --- plazo fijo UVA en la comparación -----------------------------------------
+
+def test_comparar_incluye_uva_con_cierres_de_mes(monkeypatch):
+    _con_ipc_de_7_meses(monkeypatch)
+    c = servicio.comparar_estrategias(1_000_000, 35, 6)
+    assert c.uva_inicial == pytest.approx(1000.0)
+    assert c.uva_final == pytest.approx(1000.0 * 1.03**6, rel=1e-6)
+    assert c.uva.rendimiento_nominal == pytest.approx(1.03**6 - 1, rel=1e-4)
+    assert c.uva.rendimiento_real == pytest.approx(0.0, abs=1e-4)
+    assert c.aviso_uva is None
+
+
+def test_comparar_gana_la_uva_si_supera_al_resto(monkeypatch):
+    _con_ipc_de_7_meses(monkeypatch)
+    quieto = [(f"2026-{m:02d}-28", 1000.0, 1020.0) for m in range(1, 8)]
+    monkeypatch.setattr(servicio, "descargar_blue", lambda usar_cache=True: quieto)
+    monkeypatch.setattr(servicio, "descargar_uva", lambda usar_cache=True: uva_diaria(crecimiento=0.05))
+    assert servicio.comparar_estrategias(1_000_000, 35, 6).mejor == "Plazo fijo UVA"
+
+
+def test_comparar_omite_la_uva_si_el_plazo_es_menor_a_90_dias(monkeypatch):
+    _con_ipc_de_7_meses(monkeypatch)
+    c = servicio.comparar_estrategias(1_000_000, 35, 2)
+    assert c.uva is None
+    assert "90 días" in c.aviso_uva
+
+
+def test_comparar_sigue_sin_uva_si_falla_la_descarga(monkeypatch):
+    _con_ipc_de_7_meses(monkeypatch)
+
+    def falla(usar_cache=True):
+        raise httpx.ConnectError("sin red")
+
+    monkeypatch.setattr(servicio, "descargar_uva", falla)
+    c = servicio.comparar_estrategias(1_000_000, 35, 6)
+    assert c.uva is None
+    assert "no se pudo obtener la UVA" in c.aviso_uva
+    assert c.mejor in ("Plazo fijo", "Dólar blue")
+
+
+def test_comparar_sin_uva_para_un_mes_avisa(monkeypatch):
+    _con_ipc_de_7_meses(monkeypatch)
+    monkeypatch.setattr(servicio, "descargar_uva", lambda usar_cache=True: uva_diaria(meses=range(2, 8)))
+    c = servicio.comparar_estrategias(1_000_000, 35, 6)
+    assert c.uva is None and "2026-01" in c.aviso_uva

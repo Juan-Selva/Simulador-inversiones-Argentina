@@ -8,6 +8,7 @@ from datos_de_prueba import (
     blue_actual,
     cotizaciones_actuales,
     cotizaciones_blue,
+    uva_diaria,
 )
 
 from simulador import servicio
@@ -23,6 +24,7 @@ def datos(monkeypatch):
     monkeypatch.setattr(servicio, "descargar_blue", lambda usar_cache=True: cotizaciones_blue())
     monkeypatch.setattr(servicio, "descargar_blue_actual", lambda: blue_actual())
     monkeypatch.setattr(servicio, "descargar_cotizaciones_actuales", lambda: cotizaciones_actuales())
+    monkeypatch.setattr(servicio, "descargar_uva", lambda usar_cache=True: uva_diaria())
 
 
 def test_tono_de_usa_el_valor_tal_como_se_muestra():
@@ -68,15 +70,17 @@ def test_periodo_plazo_fijo_real_y_manual():
 def test_comparacion_tabla_resumen_y_veredicto():
     c = servicio.comparar_estrategias(1_000_000, 35, 6)
     filas = vistas.filas_comparacion(c)
-    assert [fila[0].texto for fila in filas] == ["Plazo fijo", "Dólar blue"]
+    assert [fila[0].texto for fila in filas] == ["Plazo fijo", "Dólar blue", "Plazo fijo UVA"]
     assert filas[0][2].tono == "negativo"  # el plazo fijo no le gana a la inflación
     assert filas[1][2].tono == "positivo"  # el dólar sí
+    assert filas[2][1].texto == "19,41 %"  # la UVA de prueba sube igual que la inflación
     assert all(len(fila) == len(vistas.CABECERA_COMPARACION) for fila in filas)
 
     resumen = vistas.resumen_comparacion(c)
     assert "enero de 2026 a julio de 2026 (6 meses)" in resumen[0]
     assert "$ 1.010,00" in resumen[1] and "$ 1.590,00" in resumen[1]
-    assert resumen[2] == "Inflación acumulada del período: 19,41 %"
+    assert resumen[2] == "UVA (cierre de mes): 1.000,00 (fin de enero de 2026) a 1.194,05 (fin de julio de 2026)"
+    assert resumen[3] == "Inflación acumulada del período: 19,41 %"
     assert vistas.veredicto(c) == "Mejor en términos reales: Dólar blue"
 
 

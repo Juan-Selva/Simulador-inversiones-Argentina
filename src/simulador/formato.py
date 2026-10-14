@@ -15,6 +15,11 @@ def pesos(valor: float) -> str:
     return f"$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def numero(valor: float) -> str:
+    """Número con formato argentino (1.800,05)."""
+    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def pct(valor: float) -> str:
     """0.1855 -> '18,55 %'."""
     return f"{valor * 100:.2f} %".replace(".", ",")

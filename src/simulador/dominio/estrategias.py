@@ -121,3 +121,24 @@ def simular_dolar(
 
     dolares = capital / precio_compra
     return _armar_resultado(capital, dolares * precio_venta, inflacion)
+
+
+def simular_uva(
+    capital: float,
+    uva_inicial: float,
+    uva_final: float,
+    inflacion: float,
+) -> Resultado:
+    """Plazo fijo UVA: el capital se ajusta por la variación de la UVA (CER).
+
+    `uva_inicial` y `uva_final` son el valor de la UVA al empezar y al terminar
+    el período. No incluye interés adicional: los plazos fijos UVA pagan en
+    general solo el ajuste (algunos bancos suman una tasa chica). `inflacion`
+    es la inflación acumulada del período.
+    """
+    if capital < 0:
+        raise ValueError("El capital no puede ser negativo")
+    if uva_inicial <= 0 or uva_final <= 0:
+        raise ValueError("Los valores de la UVA deben ser positivos")
+
+    return _armar_resultado(capital, capital * uva_final / uva_inicial, inflacion)

@@ -48,7 +48,8 @@ simulador plazo-fijo --capital 1000000 --tna 35 --meses 6
 # Plazo fijo contra una inflación mensual constante
 simulador plazo-fijo --capital 1000000 --tna 35 --meses 6 --inflacion-mensual 3.5
 
-# Plazo fijo contra dólar blue en los últimos 6 meses (muestra también el blue de hoy)
+# Plazo fijo, dólar blue y plazo fijo UVA (ajustado por inflación, desde 3 meses) en los últimos 6 meses;
+# muestra también el blue de hoy
 simulador comparar --capital 1000000 --tna 35 --meses 6
 
 # Formas de comprar dólares hoy, con impuestos y cuántos dólares conseguís
@@ -133,5 +134,5 @@ Supuestos: la primera cuota se paga a los 30 días y las demás una por mes, tod
 - [x] Interfaz gráfica (CustomTkinter) con modo claro y oscuro
 - [x] Comprar dólares: oficial, MEP, CCL, blue, cripto y tarjeta, con impuestos
 - [x] Contado o cuotas sin interés, con descuento opcional
-- [ ] Estrategia UVA / CER
+- [x] Estrategia UVA / CER (plazo fijo UVA dentro de `comparar`)
 - [ ] Persistencia en SQLite

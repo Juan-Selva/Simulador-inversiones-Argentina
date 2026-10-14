@@ -338,6 +338,8 @@ class App(ctk.CTk):
             _linea(marco, linea)
         _tabla(marco, vistas.CABECERA_COMPARACION, vistas.filas_comparacion(c))
         _linea(marco, vistas.veredicto(c), negrita=True, tamanio=16)
+        if c.aviso_uva:
+            _linea(marco, c.aviso_uva, tono="suave")
         valores, detalle = vistas.tarjeta_blue(c.blue_hoy)
         _linea(marco, f"Dólar blue: {valores} ({detalle.lower()})")
         aviso = vistas.aviso_blue(c.blue_hoy)

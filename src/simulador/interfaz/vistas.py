@@ -18,6 +18,7 @@ from simulador.formato import (
     detalle_actualizacion,
     dolares,
     nombre_mes,
+    numero,
     pct,
     pesos,
 )
@@ -86,17 +87,26 @@ CABECERA_COMPARACION = ["Estrategia", "Nominal", "Real", "Monto final (pesos de 
 
 
 def resumen_comparacion(c: Comparacion) -> list[str]:
-    return [
+    lineas = [
         f"Período: {nombre_mes(c.inicio)} a {nombre_mes(c.fin)} ({c.meses} meses), inflación real del INDEC",
         f"Dólar blue (cierre de mes): comprás a {pesos(c.precio_compra)} "
         f"(fin de {nombre_mes(c.inicio)}) y vendés a {pesos(c.precio_venta)} (fin de {nombre_mes(c.fin)})",
-        f"Inflación acumulada del período: {pct(c.plazo_fijo.inflacion_acumulada)}",
     ]
+    if c.uva is not None:
+        lineas.append(
+            f"UVA (cierre de mes): {numero(c.uva_inicial)} (fin de {nombre_mes(c.inicio)}) "
+            f"a {numero(c.uva_final)} (fin de {nombre_mes(c.fin)})"
+        )
+    lineas.append(f"Inflación acumulada del período: {pct(c.plazo_fijo.inflacion_acumulada)}")
+    return lineas
 
 
 def filas_comparacion(c: Comparacion) -> list[list[Celda]]:
     filas = []
-    for nombre, r in (("Plazo fijo", c.plazo_fijo), ("Dólar blue", c.dolar)):
+    estrategias = [("Plazo fijo", c.plazo_fijo), ("Dólar blue", c.dolar)]
+    if c.uva is not None:
+        estrategias.append(("Plazo fijo UVA", c.uva))
+    for nombre, r in estrategias:
         filas.append(
             [
                 Celda(nombre),

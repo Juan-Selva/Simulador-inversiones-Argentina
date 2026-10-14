@@ -9,6 +9,7 @@ from datos_de_prueba import (
     blue_actual,
     cotizaciones_actuales,
     cotizaciones_blue,
+    uva_diaria,
 )
 from typer.testing import CliRunner
 
@@ -27,6 +28,7 @@ def _parchear(monkeypatch, ipc=IPC_7_MESES, blue=None, hoy=(2026, 10, 13), en_vi
     )
     monkeypatch.setattr(servicio, "descargar_blue_actual", lambda: en_vivo or blue_actual())
     monkeypatch.setattr(servicio, "descargar_cotizaciones_actuales", lambda: cotizaciones_actuales())
+    monkeypatch.setattr(servicio, "descargar_uva", lambda usar_cache=True: uva_diaria())
 
 
 def _invocar(*args):
@@ -156,6 +158,8 @@ def test_comparar_muestra_estrategias_mejor_y_blue_de_hoy(monkeypatch):
     assert "Plazo fijo" in r.output and "Dólar blue" in r.output
     assert "Inflación acumulada: 19,41 %" in r.output
     assert "Mejor en términos reales: Dólar blue" in r.output
+    assert "Plazo fijo UVA" in r.output
+    assert "UVA (cierre de mes): 1.000,00 (fin de 2026-01) a 1.194,05 (fin de 2026-07)" in r.output
     assert "Dólar blue: compra $ 1.520,00 | venta $ 1.540,00 (actualizado hoy a las 14:30)" in r.output
 
 

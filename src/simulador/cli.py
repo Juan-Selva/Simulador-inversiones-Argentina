@@ -17,6 +17,7 @@ from simulador.formato import (
     detalle_actualizacion,
     dolares,
     nombre_mes,
+    numero,
     pct,
     pesos,
 )
@@ -130,7 +131,7 @@ def comparar_cmd(
     tna: float = typer.Option(..., help="TNA del plazo fijo, en porcentaje (ej: 35)"),
     meses: int = typer.Option(6, help="Cantidad de meses hacia atrás a simular"),
 ) -> None:
-    """Compara plazo fijo contra dólar blue, usando la inflación real del INDEC."""
+    """Compara plazo fijo, dólar blue y plazo fijo UVA, usando la inflación real del INDEC."""
     c = _ejecutar(lambda: servicio.comparar_estrategias(capital, tna, meses))
 
     typer.echo(f"Período: {c.inicio} a {c.fin} ({c.meses} meses), inflación real del INDEC")
@@ -138,15 +139,24 @@ def comparar_cmd(
         f"Dólar blue (cierre de mes): comprás a {pesos(c.precio_compra)} (fin de {c.inicio}), "
         f"vendés a {pesos(c.precio_venta)} (fin de {c.fin})"
     )
-    typer.echo("")
-    typer.echo(f"{'Estrategia':<12}{'Nominal':>10}{'Real':>10}  Monto final (pesos de hoy)")
-    for nombre, r in (("Plazo fijo", c.plazo_fijo), ("Dólar blue", c.dolar)):
+    if c.uva is not None:
         typer.echo(
-            f"{nombre:<12}{pct(r.rendimiento_nominal):>10}{pct(r.rendimiento_real):>10}"
+            f"UVA (cierre de mes): {numero(c.uva_inicial)} (fin de {c.inicio}) a {numero(c.uva_final)} (fin de {c.fin})"
+        )
+    typer.echo("")
+    typer.echo(f"{'Estrategia':<16}{'Nominal':>10}{'Real':>10}  Monto final (pesos de hoy)")
+    estrategias = [("Plazo fijo", c.plazo_fijo), ("Dólar blue", c.dolar)]
+    if c.uva is not None:
+        estrategias.append(("Plazo fijo UVA", c.uva))
+    for nombre, r in estrategias:
+        typer.echo(
+            f"{nombre:<16}{pct(r.rendimiento_nominal):>10}{pct(r.rendimiento_real):>10}"
             f"  {pesos(r.monto_final_real)}"
         )
     typer.echo(f"Inflación acumulada: {pct(c.plazo_fijo.inflacion_acumulada)}")
     typer.echo(f"Mejor en términos reales: {c.mejor}")
+    if c.aviso_uva:
+        typer.echo(c.aviso_uva)
     typer.echo("")
     _mostrar_blue(c.blue_hoy)
     typer.echo("Resultado histórico: no predice rendimientos futuros.")

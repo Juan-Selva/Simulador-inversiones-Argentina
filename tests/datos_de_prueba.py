@@ -64,3 +64,13 @@ def cotizaciones_actuales(sin=()):
         "cripto": CotizacionActual(1605.97, 1610.17, ahora),
     }
     return {casa: cotizacion for casa, cotizacion in datos.items() if casa not in sin}
+
+
+def uva_diaria(meses=range(1, 9), crecimiento=0.03):
+    """UVA de prueba: cada mes publica el día 10 y el 28; el valor crece `crecimiento` por mes."""
+    filas = []
+    for m in meses:
+        base = 1000.0 * (1 + crecimiento) ** (m - 1)
+        filas.append((f"2026-{m:02d}-10", round(base * 0.99, 4)))
+        filas.append((f"2026-{m:02d}-28", round(base, 4)))
+    return filas

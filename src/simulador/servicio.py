@@ -28,8 +28,10 @@ from simulador.dominio.cuotas import (
     tna_de_tasa_mensual,
     valor_presente_de_cuotas,
 )
-from simulador.dominio.estrategias import Resultado, simular_dolar, simular_plazo_fijo
+from simulador.dominio.estrategias import Resultado, simular_dolar, simular_plazo_fijo, simular_uva
 from simulador.formato import nombre_mes, pct
+from simulador.ingesta.uva import cierres_mensuales as cierres_uva
+from simulador.ingesta.uva import descargar_uva
 from simulador.ingesta.dolar import (
     Cotizacion,
     CotizacionActual,
@@ -97,12 +99,18 @@ class Comparacion:
     plazo_fijo: Resultado
     dolar: Resultado
     blue_hoy: DolarHoy
+    uva: Resultado | None = None  # None si no se pudo simular (ver aviso_uva)
+    uva_inicial: float | None = None
+    uva_final: float | None = None
+    aviso_uva: str | None = None
 
     @property
     def mejor(self) -> str:
-        if self.plazo_fijo.rendimiento_real >= self.dolar.rendimiento_real:
-            return "Plazo fijo"
-        return "Dólar blue"
+        opciones = [("Plazo fijo", self.plazo_fijo), ("Dólar blue", self.dolar)]
+        if self.uva is not None:
+            opciones.append(("Plazo fijo UVA", self.uva))
+        # max se queda con la primera ante empate: el orden de la lista desempata.
+        return max(opciones, key=lambda o: o[1].rendimiento_real)[0]
 
 
 def _cargar_ipc() -> list[tuple[str, float]]:
@@ -129,6 +137,24 @@ def _cargar_blue() -> list[Cotizacion]:
         raise ErrorSimulador(
             f"La API devolvió datos del dólar en un formato inesperado ({error!r})."
         ) from error
+
+
+MESES_MINIMOS_UVA = 3  # los plazos fijos UVA tienen un plazo mínimo de 90 días
+
+
+def _simular_uva(capital: float, inicio: str, fin: str, meses: int, inflacion: float) -> dict:
+    """Campos de `Comparacion` para el plazo fijo UVA; si no se puede, explica por qué."""
+    vacio = {"uva": None, "uva_inicial": None, "uva_final": None}
+    if meses < MESES_MINIMOS_UVA:
+        return {**vacio, "aviso_uva": "Plazo fijo UVA no incluido: exige un plazo mínimo de 90 días (3 meses)."}
+    try:
+        cierres = cierres_uva(descargar_uva())
+        uva_inicial = valor_del_mes(cierres, inicio)
+        uva_final = valor_del_mes(cierres, fin)
+        resultado = simular_uva(capital, uva_inicial, uva_final, inflacion)
+    except (httpx.HTTPError, KeyError, TypeError, ValueError, AttributeError) as error:
+        return {**vacio, "aviso_uva": f"Plazo fijo UVA no incluido: no se pudo obtener la UVA ({error})."}
+    return {"uva": resultado, "uva_inicial": uva_inicial, "uva_final": uva_final, "aviso_uva": None}
 
 
 def _validar(capital: float, tna: float, meses: int) -> None:
@@ -242,7 +268,7 @@ def calcular_plazo_fijo(
 
 
 def comparar_estrategias(capital: float, tna: float, meses: int) -> Comparacion:
-    """Plazo fijo contra dólar blue en los últimos `meses` meses con inflación publicada."""
+    """Plazo fijo, dólar blue y plazo fijo UVA en los últimos `meses` meses con inflación publicada."""
     _validar(capital, tna, meses)
     datos = inflacion_ultimos_meses(meses)
     variaciones = [v for _, v in datos]
@@ -268,6 +294,7 @@ def comparar_estrategias(capital: float, tna: float, meses: int) -> Comparacion:
         plazo_fijo=plazo,
         dolar=dolar,
         blue_hoy=_blue_de_hoy(cotizaciones),
+        **_simular_uva(capital, inicio, fin, meses, plazo.inflacion_acumulada),
     )
 
 
