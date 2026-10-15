@@ -14,6 +14,7 @@ src/simulador/
   formato.py   formato de pesos, porcentajes y meses en español
   instantanea.py  foto de una simulación (parámetros, valores y texto) para guardarla
   historial.py    historial de simulaciones guardadas en SQLite
+  exportar.py     exportación de simulaciones a PDF (fpdf2)
   cli.py       interfaz de línea de comandos (Typer)
   interfaz/    interfaz gráfica (CustomTkinter): app.py dibuja, vistas.py y entradas.py son lógica testeable
 tests/         tests con pytest, sin depender de la red
@@ -76,6 +77,10 @@ simulador historial listar
 simulador historial ver 1
 simulador historial renombrar 1 "Plazo fijo vs blue, octubre"
 simulador historial borrar 1
+
+# Exportar a PDF: el resultado recién calculado (sin guardarlo) o una simulación guardada
+simulador comparar --capital 1000000 --tna 35 --meses 6 --pdf comparacion.pdf
+simulador historial exportar 1 --salida comparacion-octubre.pdf
 ```
 
 ## Interfaz gráfica
@@ -146,6 +151,10 @@ Se guarda lo que había en el momento de simular: los parámetros que ingresaste
 
 Los datos viven en una base SQLite local, en `~/.local/share/simulador-inversiones/historial.db` (en Windows, dentro de tu carpeta de usuario). No se sube a ningún lado.
 
+## Exportar a PDF
+
+Cualquier resultado se puede llevar a un PDF: con `--pdf RUTA` en los comandos de simulación, con `historial exportar NUMERO` para algo ya guardado, o con el botón «Exportar PDF» de la interfaz (al pie de cada resultado y en el detalle del historial). Exportar no guarda nada en el historial. El PDF reproduce el texto del resultado tal como se vio, con la fecha, y un pie que aclara que no es asesoramiento financiero. Si guardaste la simulación, muestra los valores de ese día, no los de hoy.
+
 ## Estado y próximos pasos
 
 - [x] Plazo fijo (simple y renovado) con comparación contra inflación
@@ -157,3 +166,4 @@ Los datos viven en una base SQLite local, en `~/.local/share/simulador-inversion
 - [x] Contado o cuotas sin interés, con descuento opcional
 - [x] Estrategia UVA / CER (plazo fijo UVA dentro de `comparar`)
 - [x] Historial de simulaciones guardadas (SQLite), con nombre y fecha
+- [x] Exportar resultados a PDF

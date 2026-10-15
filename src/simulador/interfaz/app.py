@@ -10,6 +10,7 @@ from __future__ import annotations
 import queue
 import threading
 from datetime import date
+from pathlib import Path
 from typing import Callable, Iterable
 
 try:
@@ -19,10 +20,11 @@ except ImportError as error:  # pragma: no cover
         'Falta customtkinter. Instalalo con: pip install -e ".[gui]"'
     ) from error
 
-from simulador import historial, instantanea, preferencias, servicio
+from simulador import exportar, historial, instantanea, preferencias, servicio
 from simulador.formato import MESES
 from simulador.interfaz import vistas
 from simulador.interfaz.entradas import parsear_entero, parsear_numero, parsear_numero_opcional
+from simulador.exportar import ErrorExportacion
 from simulador.historial import ErrorHistorial
 from simulador.servicio import ErrorSimulador
 
@@ -46,7 +48,7 @@ def _tono(tono: str) -> dict:
 
 
 def _texto_de_error(error: Exception) -> str:
-    if isinstance(error, (ErrorSimulador, ErrorHistorial)):
+    if isinstance(error, (ErrorSimulador, ErrorHistorial, ErrorExportacion)):
         return str(error)
     return f"Ocurrió un error inesperado: {error}"
 
@@ -611,9 +613,11 @@ class App(ctk.CTk):
         nombre = ctk.CTkEntry(caja, width=300, placeholder_text="Nombre, por ejemplo: Plazo fijo de marzo")
         nombre.grid(row=1, column=0, padx=(8, 10), pady=4, sticky="w")
         boton = ctk.CTkButton(caja, text="Guardar", width=90)
-        boton.grid(row=1, column=1, sticky="w")
+        boton.grid(row=1, column=1, padx=(0, 10), sticky="w")
+        boton_pdf = ctk.CTkButton(caja, text="Exportar PDF", width=110)
+        boton_pdf.grid(row=1, column=2, sticky="w")
         estado = ctk.CTkLabel(caja, text="", anchor="w", wraplength=700, justify="left")
-        estado.grid(row=2, column=0, columnspan=2, padx=8, sticky="w")
+        estado.grid(row=2, column=0, columnspan=3, padx=8, sticky="w")
 
         def guardar() -> None:
             try:
@@ -628,7 +632,33 @@ class App(ctk.CTk):
             nombre.configure(state="disabled")
             self._refrescar_historial()
 
+        def exportar_pdf() -> None:
+            titulo = " ".join(nombre.get().split()) or instantanea.NOMBRES_DE_TIPO[foto.tipo]
+            ruta = self._elegir_ruta_pdf(exportar.nombre_de_archivo(titulo))
+            if ruta is None:
+                return
+            try:
+                final = exportar.exportar_instantanea(titulo, foto, ruta)
+            except ErrorExportacion as error:
+                estado.configure(text=str(error), **_tono("negativo"))
+                return
+            estado.configure(text=f"PDF guardado en {final}", **_tono("positivo"))
+
         boton.configure(command=guardar)
+        boton_pdf.configure(command=exportar_pdf)
+
+    def _elegir_ruta_pdf(self, sugerido: str) -> Path | None:
+        """Abre el diálogo de 'Guardar como' del sistema; devuelve None si se cancela."""
+        from tkinter import filedialog
+
+        ruta = filedialog.asksaveasfilename(
+            parent=self,
+            title="Exportar a PDF",
+            defaultextension=".pdf",
+            initialfile=f"{sugerido}.pdf",
+            filetypes=[("PDF", "*.pdf")],
+        )
+        return Path(ruta) if ruta else None
 
     # -- pestaña Historial
 
@@ -706,15 +736,28 @@ class App(ctk.CTk):
     def _acciones_de_registro(self, marco, r) -> None:
         caja = ctk.CTkFrame(marco, fg_color="transparent")
         caja.pack(fill="x", anchor="w", pady=(14, 4))
-        nombre = ctk.CTkEntry(caja, width=260)
+        nombre = ctk.CTkEntry(caja, width=220)
         nombre.insert(0, r.nombre)
         nombre.grid(row=0, column=0, padx=(8, 10), pady=4, sticky="w")
         renombrar = ctk.CTkButton(caja, text="Renombrar", width=100)
-        renombrar.grid(row=0, column=1, padx=(0, 24), sticky="w")
-        borrar = ctk.CTkButton(caja, text="Borrar", width=100, fg_color=("#cf222e", "#b62324"), hover_color=("#a40e26", "#8e1519"))
-        borrar.grid(row=0, column=2, sticky="w")
+        renombrar.grid(row=0, column=1, padx=(0, 10), sticky="w")
+        boton_pdf = ctk.CTkButton(caja, text="Exportar PDF", width=110)
+        boton_pdf.grid(row=0, column=2, padx=(0, 24), sticky="w")
+        borrar = ctk.CTkButton(caja, text="Borrar", width=90, fg_color=("#cf222e", "#b62324"), hover_color=("#a40e26", "#8e1519"))
+        borrar.grid(row=0, column=3, sticky="w")
         estado = ctk.CTkLabel(caja, text="", anchor="w", wraplength=700, justify="left")
-        estado.grid(row=1, column=0, columnspan=3, padx=8, sticky="w")
+        estado.grid(row=1, column=0, columnspan=4, padx=8, sticky="w")
+
+        def exportar_pdf() -> None:
+            ruta = self._elegir_ruta_pdf(exportar.nombre_de_archivo(r.nombre, r.id))
+            if ruta is None:
+                return
+            try:
+                final = exportar.exportar_registro(r, ruta)
+            except ErrorExportacion as error:
+                estado.configure(text=str(error), **_tono("negativo"))
+                return
+            estado.configure(text=f"PDF guardado en {final}", **_tono("positivo"))
 
         def renombrar_registro() -> None:
             try:
@@ -741,6 +784,7 @@ class App(ctk.CTk):
             self._refrescar_historial()
 
         renombrar.configure(command=renombrar_registro)
+        boton_pdf.configure(command=exportar_pdf)
         borrar.configure(command=borrar_registro)
 
 

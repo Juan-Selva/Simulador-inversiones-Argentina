@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable, NoReturn, Optional, TypeVar
 
 import typer
 
-from simulador import historial, instantanea, servicio
+from simulador import exportar, historial, instantanea, servicio
 from simulador.dominio.estrategias import inflacion_acumulada
 from simulador.formato import (
     AVISO_BLUE_DESACTUALIZADO,
@@ -21,6 +22,7 @@ from simulador.formato import (
     pct,
     pesos,
 )
+from simulador.exportar import ErrorExportacion
 from simulador.historial import ErrorHistorial
 from simulador.servicio import DolarHoy, ErrorSimulador
 
@@ -47,6 +49,30 @@ GUARDAR = typer.Option(
     metavar="NOMBRE",
     help="Guarda la simulación en el historial con este nombre. Por defecto no se guarda nada.",
 )
+
+
+PDF = typer.Option(
+    None,
+    "--pdf",
+    metavar="RUTA",
+    help="Exporta el resultado a un PDF en esta ruta (ej: resultado.pdf).",
+)
+
+
+def _exportar_pdf(ruta: Optional[Path], titulo: str, foto: instantanea.Instantanea) -> None:
+    if ruta is None:
+        return
+    try:
+        final = exportar.exportar_instantanea(titulo, foto, ruta)
+    except ErrorExportacion as error:
+        _salir(str(error))
+    typer.echo(f"PDF guardado en: {final.resolve()}")
+
+
+def _terminar(nombre: Optional[str], pdf: Optional[Path], foto: instantanea.Instantanea) -> None:
+    """Fin de cada simulación: guarda en el historial y/o exporta a PDF si el usuario lo pidió."""
+    _guardar(nombre, foto)
+    _exportar_pdf(pdf, nombre or instantanea.NOMBRES_DE_TIPO[foto.tipo], foto)
 
 
 def _guardar(nombre: Optional[str], foto: instantanea.Instantanea) -> None:
@@ -127,6 +153,7 @@ def plazo_fijo_cmd(
     ),
     renovar: bool = typer.Option(True, help="Renovar cada 30 días capitalizando intereses"),
     guardar: Optional[str] = GUARDAR,
+    pdf: Optional[Path] = PDF,
 ) -> None:
     """Simula un plazo fijo y lo compara contra la inflación."""
     try:
@@ -145,7 +172,7 @@ def plazo_fijo_cmd(
     typer.echo(f"Inflación acumulada:    {pct(r.inflacion_acumulada)}")
     typer.echo(f"Rendimiento real:       {pct(r.rendimiento_real)}")
     typer.echo(f"Monto final (pesos de hoy): {pesos(r.monto_final_real)}")
-    _guardar(guardar, instantanea.de_plazo_fijo(capital, tna, meses, inflacion_mensual, renovar, sim))
+    _terminar(guardar, pdf, instantanea.de_plazo_fijo(capital, tna, meses, inflacion_mensual, renovar, sim))
 
 
 @app.command("comparar")
@@ -154,6 +181,7 @@ def comparar_cmd(
     tna: float = typer.Option(..., help="TNA del plazo fijo, en porcentaje (ej: 35)"),
     meses: int = typer.Option(6, help="Cantidad de meses hacia atrás a simular"),
     guardar: Optional[str] = GUARDAR,
+    pdf: Optional[Path] = PDF,
 ) -> None:
     """Compara plazo fijo, dólar blue y plazo fijo UVA, usando la inflación real del INDEC."""
     c = _ejecutar(lambda: servicio.comparar_estrategias(capital, tna, meses))
@@ -184,7 +212,7 @@ def comparar_cmd(
     typer.echo("")
     _mostrar_blue(c.blue_hoy)
     typer.echo("Resultado histórico: no predice rendimientos futuros.")
-    _guardar(guardar, instantanea.de_comparacion(capital, tna, meses, c))
+    _terminar(guardar, pdf, instantanea.de_comparacion(capital, tna, meses, c))
 
 
 @app.command("comprar-dolares")
@@ -194,6 +222,7 @@ def comprar_dolares_cmd(
         0.0, help="Comisión del broker para MEP y CCL, en porcentaje (ej: 0.3)"
     ),
     guardar: Optional[str] = GUARDAR,
+    pdf: Optional[Path] = PDF,
 ) -> None:
     """Compara las formas de comprar dólares en Argentina, con impuestos y cargos."""
     c = _ejecutar(lambda: servicio.comprar_dolares(pesos_a_gastar, comision_broker))
@@ -227,7 +256,7 @@ def comprar_dolares_cmd(
     typer.echo(aviso_normas(c.reglas_al))
     if c.sin_cotizacion:
         typer.echo("Sin cotización de la fuente para: " + ", ".join(c.sin_cotizacion) + ".")
-    _guardar(guardar, instantanea.de_compra_dolares(comision_broker, c))
+    _terminar(guardar, pdf, instantanea.de_compra_dolares(comision_broker, c))
 
 
 @app.command("contado-o-cuotas")
@@ -241,6 +270,7 @@ def contado_o_cuotas_cmd(
         help="Inflación mensual esperada, en porcentaje. Si se omite, usa la del último mes publicado por el INDEC.",
     ),
     guardar: Optional[str] = GUARDAR,
+    pdf: Optional[Path] = PDF,
 ) -> None:
     """Calcula si conviene pagar de contado o en cuotas sin interés."""
     c = _ejecutar(lambda: servicio.comparar_contado_y_cuotas(precio, cuotas, tna, descuento, inflacion_mensual))
@@ -273,7 +303,7 @@ def contado_o_cuotas_cmd(
     typer.echo(SUPUESTOS_CUOTAS)
     if c.aviso:
         typer.echo(c.aviso)
-    _guardar(guardar, instantanea.de_contado_cuotas(precio, cuotas, tna, descuento, inflacion_mensual, c))
+    _terminar(guardar, pdf, instantanea.de_contado_cuotas(precio, cuotas, tna, descuento, inflacion_mensual, c))
 
 
 # --- historial de simulaciones guardadas ---------------------------------------
@@ -320,6 +350,23 @@ def historial_ver_cmd(
         typer.echo(linea)
     typer.echo("")
     typer.echo("Son los valores de ese momento: no se recalculan con los datos de hoy.")
+
+
+@historial_app.command("exportar")
+def historial_exportar_cmd(
+    numero_: int = typer.Argument(..., metavar="NUMERO"),
+    salida: Optional[Path] = typer.Option(
+        None, "--salida", metavar="RUTA", help="Dónde guardar el PDF. Por defecto, en la carpeta actual."
+    ),
+) -> None:
+    """Exporta una simulación guardada a PDF, con los valores de cuando la guardaste."""
+    r = _con_historial(lambda: historial.obtener(numero_))
+    ruta = salida or Path(exportar.nombre_de_archivo(r.nombre, r.id) + ".pdf")
+    try:
+        final = exportar.exportar_registro(r, ruta)
+    except ErrorExportacion as error:
+        _salir(str(error))
+    typer.echo(f"PDF guardado en: {final.resolve()}")
 
 
 @historial_app.command("renombrar")
