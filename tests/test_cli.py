@@ -13,7 +13,7 @@ from datos_de_prueba import (
 )
 from typer.testing import CliRunner
 
-from simulador import cli, servicio
+from simulador import cli, historial, servicio
 
 runner = CliRunner()
 
@@ -267,3 +267,93 @@ def test_contado_o_cuotas_parametros_invalidos(monkeypatch):
     r = _invocar("contado-o-cuotas", "--precio", "120000", "--cuotas", "6", "--tna", "35", "--descuento", "100")
     assert r.exit_code == 1
     assert "descuento" in r.output
+
+
+# --- historial -----------------------------------------------------------------
+
+def test_sin_guardar_no_se_escribe_nada_en_el_historial(monkeypatch):
+    _parchear(monkeypatch)
+    r = _invocar("comparar", "--capital", "1000000", "--tna", "35", "--meses", "6")
+    assert r.exit_code == 0
+    assert "Guardada" not in r.output
+    assert historial.listar() == []
+
+
+@pytest.mark.parametrize(
+    "comando, tipo",
+    [
+        (["comparar", "--capital", "1000000", "--tna", "35", "--meses", "6"], "comparacion"),
+        (["plazo-fijo", "--capital", "1000000", "--tna", "35", "--meses", "6"], "plazo_fijo"),
+        (["comprar-dolares", "--pesos", "1000000"], "compra_dolares"),
+        (["contado-o-cuotas", "--precio", "120000", "--cuotas", "6", "--tna", "35", "--descuento", "10"], "contado_cuotas"),
+    ],
+)
+def test_guardar_funciona_en_cada_simulacion(monkeypatch, comando, tipo):
+    _parchear(monkeypatch)
+    r = _invocar(*comando, "--guardar", "Mi prueba")
+    assert r.exit_code == 0, r.output
+    assert "Guardada en el historial como «Mi prueba» (n.º 1)." in r.output
+    [guardada] = historial.listar()
+    assert (guardada.nombre, guardada.tipo) == ("Mi prueba", tipo)
+    assert guardada.texto  # quedó la foto de lo que se vio
+
+
+def test_guardar_con_nombre_vacio_avisa(monkeypatch):
+    _parchear(monkeypatch)
+    r = _invocar("plazo-fijo", "--capital", "1000", "--tna", "35", "--meses", "1", "--guardar", " ")
+    assert r.exit_code == 1
+    assert "nombre" in r.output
+    assert historial.listar() == []
+
+
+def test_si_la_simulacion_falla_no_se_guarda_nada(monkeypatch):
+    _parchear(monkeypatch)
+    r = _invocar("plazo-fijo", "--capital", "-5", "--tna", "35", "--guardar", "x")
+    assert r.exit_code == 1
+    assert historial.listar() == []
+
+
+def test_historial_vacio_explica_como_guardar():
+    r = _invocar("historial", "listar")
+    assert r.exit_code == 0
+    assert "--guardar" in r.output
+
+
+def test_historial_listar_ver_renombrar_y_borrar(monkeypatch):
+    _parchear(monkeypatch)
+    _invocar("comparar", "--capital", "1000000", "--tna", "35", "--meses", "6", "--guardar", "Seis meses")
+
+    listado = _invocar("historial", "listar")
+    assert "Seis meses" in listado.output and "Comparación de estrategias" in listado.output
+
+    # Cambia el mercado: lo guardado sigue mostrando lo que había entonces.
+    monkeypatch.setattr(servicio, "descargar_blue", lambda usar_cache=True: cotizaciones_blue(meses=range(1, 8))[:0])
+    ver = _invocar("historial", "ver", "1")
+    assert ver.exit_code == 0
+    assert "Seis meses (Comparación de estrategias)" in ver.output
+    assert "Guardada el " in ver.output
+    assert "$ 1.010,00" in ver.output and "$ 1.590,00" in ver.output
+    assert "no se recalculan" in ver.output
+
+    r = _invocar("historial", "renombrar", "1", "Mi comparación")
+    assert "ahora se llama «Mi comparación»" in r.output
+    assert "Mi comparación" in _invocar("historial", "listar").output
+
+    r = runner.invoke(cli.app, ["historial", "borrar", "1"], input="n\n")
+    assert "No se borró nada." in r.output and len(historial.listar()) == 1
+    r = runner.invoke(cli.app, ["historial", "borrar", "1"], input="s\n")
+    assert "Se borró «Mi comparación»" in r.output and historial.listar() == []
+
+
+def test_historial_borrar_con_si_no_pregunta(monkeypatch):
+    _parchear(monkeypatch)
+    _invocar("plazo-fijo", "--capital", "1000", "--tna", "35", "--meses", "1", "--inflacion-mensual", "2", "--guardar", "x")
+    r = _invocar("historial", "borrar", "1", "--si")
+    assert r.exit_code == 0 and historial.listar() == []
+
+
+def test_historial_numero_inexistente():
+    for args in (["ver", "7"], ["borrar", "7", "--si"], ["renombrar", "7", "x"]):
+        r = _invocar("historial", *args)
+        assert r.exit_code == 1
+        assert "7" in r.output

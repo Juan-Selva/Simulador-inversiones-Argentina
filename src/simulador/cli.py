@@ -6,7 +6,7 @@ from typing import Callable, NoReturn, Optional, TypeVar
 
 import typer
 
-from simulador import servicio
+from simulador import historial, instantanea, servicio
 from simulador.dominio.estrategias import inflacion_acumulada
 from simulador.formato import (
     AVISO_BLUE_DESACTUALIZADO,
@@ -21,6 +21,7 @@ from simulador.formato import (
     pct,
     pesos,
 )
+from simulador.historial import ErrorHistorial
 from simulador.servicio import DolarHoy, ErrorSimulador
 
 app = typer.Typer(help="Simulador de inversiones con datos argentinos.")
@@ -38,6 +39,26 @@ def _ejecutar(llamada: Callable[[], T]) -> T:
         return llamada()
     except ErrorSimulador as error:
         _salir(str(error))
+
+
+GUARDAR = typer.Option(
+    None,
+    "--guardar",
+    metavar="NOMBRE",
+    help="Guarda la simulación en el historial con este nombre. Por defecto no se guarda nada.",
+)
+
+
+def _guardar(nombre: Optional[str], foto: instantanea.Instantanea) -> None:
+    """Guarda la simulación en el historial si el usuario pidió un nombre con --guardar."""
+    if nombre is None:
+        return
+    try:
+        registro = historial.guardar(nombre, foto)
+    except ErrorHistorial as error:
+        _salir(str(error))
+    typer.echo("")
+    typer.echo(f"Guardada en el historial como «{registro.nombre}» (n.º {registro.id}).")
 
 
 def _mes(fecha_iso: str) -> str:
@@ -105,6 +126,7 @@ def plazo_fijo_cmd(
         "Si se omite, usa el IPC real del INDEC de los últimos meses.",
     ),
     renovar: bool = typer.Option(True, help="Renovar cada 30 días capitalizando intereses"),
+    guardar: Optional[str] = GUARDAR,
 ) -> None:
     """Simula un plazo fijo y lo compara contra la inflación."""
     try:
@@ -123,6 +145,7 @@ def plazo_fijo_cmd(
     typer.echo(f"Inflación acumulada:    {pct(r.inflacion_acumulada)}")
     typer.echo(f"Rendimiento real:       {pct(r.rendimiento_real)}")
     typer.echo(f"Monto final (pesos de hoy): {pesos(r.monto_final_real)}")
+    _guardar(guardar, instantanea.de_plazo_fijo(capital, tna, meses, inflacion_mensual, renovar, sim))
 
 
 @app.command("comparar")
@@ -130,6 +153,7 @@ def comparar_cmd(
     capital: float = typer.Option(..., help="Capital inicial en pesos"),
     tna: float = typer.Option(..., help="TNA del plazo fijo, en porcentaje (ej: 35)"),
     meses: int = typer.Option(6, help="Cantidad de meses hacia atrás a simular"),
+    guardar: Optional[str] = GUARDAR,
 ) -> None:
     """Compara plazo fijo, dólar blue y plazo fijo UVA, usando la inflación real del INDEC."""
     c = _ejecutar(lambda: servicio.comparar_estrategias(capital, tna, meses))
@@ -160,6 +184,7 @@ def comparar_cmd(
     typer.echo("")
     _mostrar_blue(c.blue_hoy)
     typer.echo("Resultado histórico: no predice rendimientos futuros.")
+    _guardar(guardar, instantanea.de_comparacion(capital, tna, meses, c))
 
 
 @app.command("comprar-dolares")
@@ -168,6 +193,7 @@ def comprar_dolares_cmd(
     comision_broker: float = typer.Option(
         0.0, help="Comisión del broker para MEP y CCL, en porcentaje (ej: 0.3)"
     ),
+    guardar: Optional[str] = GUARDAR,
 ) -> None:
     """Compara las formas de comprar dólares en Argentina, con impuestos y cargos."""
     c = _ejecutar(lambda: servicio.comprar_dolares(pesos_a_gastar, comision_broker))
@@ -201,6 +227,7 @@ def comprar_dolares_cmd(
     typer.echo(aviso_normas(c.reglas_al))
     if c.sin_cotizacion:
         typer.echo("Sin cotización de la fuente para: " + ", ".join(c.sin_cotizacion) + ".")
+    _guardar(guardar, instantanea.de_compra_dolares(comision_broker, c))
 
 
 @app.command("contado-o-cuotas")
@@ -213,6 +240,7 @@ def contado_o_cuotas_cmd(
         None,
         help="Inflación mensual esperada, en porcentaje. Si se omite, usa la del último mes publicado por el INDEC.",
     ),
+    guardar: Optional[str] = GUARDAR,
 ) -> None:
     """Calcula si conviene pagar de contado o en cuotas sin interés."""
     c = _ejecutar(lambda: servicio.comparar_contado_y_cuotas(precio, cuotas, tna, descuento, inflacion_mensual))
@@ -245,6 +273,77 @@ def contado_o_cuotas_cmd(
     typer.echo(SUPUESTOS_CUOTAS)
     if c.aviso:
         typer.echo(c.aviso)
+    _guardar(guardar, instantanea.de_contado_cuotas(precio, cuotas, tna, descuento, inflacion_mensual, c))
+
+
+# --- historial de simulaciones guardadas ---------------------------------------
+
+historial_app = typer.Typer(help="Simulaciones que guardaste con --guardar.", no_args_is_help=True)
+app.add_typer(historial_app, name="historial")
+
+
+def _con_historial(llamada: Callable[[], T]) -> T:
+    try:
+        return llamada()
+    except ErrorHistorial as error:
+        _salir(str(error))
+
+
+def _confirmar(pregunta: str) -> bool:
+    """Pregunta sí o no en español (typer.confirm solo acepta y/n). Enter equivale a no."""
+    respuesta = typer.prompt(f"{pregunta} [s/N]", default="n", show_default=False)
+    return respuesta.strip().lower() in ("s", "si", "sí", "y", "yes")
+
+
+@historial_app.command("listar")
+def historial_listar_cmd() -> None:
+    """Lista las simulaciones guardadas, de la más nueva a la más vieja."""
+    registros = _con_historial(historial.listar)
+    if not registros:
+        typer.echo("Todavía no guardaste ninguna simulación. Agregá --guardar NOMBRE al correr una.")
+        return
+    typer.echo(f"{'N.º':<5}{'Fecha':<18}{'Tipo':<30}Nombre")
+    for r in registros:
+        typer.echo(f"{r.id:<5}{r.fecha_legible:<18}{r.nombre_de_tipo:<30}{r.nombre}")
+
+
+@historial_app.command("ver")
+def historial_ver_cmd(
+    numero_: int = typer.Argument(..., metavar="NUMERO", help="Número de la simulación (ver 'historial listar')"),
+) -> None:
+    """Muestra una simulación guardada tal como se veía cuando la guardaste."""
+    r = _con_historial(lambda: historial.obtener(numero_))
+    typer.echo(f"{r.nombre} ({r.nombre_de_tipo})")
+    typer.echo(f"Guardada el {r.fecha_legible}")
+    typer.echo("")
+    for linea in r.texto:
+        typer.echo(linea)
+    typer.echo("")
+    typer.echo("Son los valores de ese momento: no se recalculan con los datos de hoy.")
+
+
+@historial_app.command("renombrar")
+def historial_renombrar_cmd(
+    numero_: int = typer.Argument(..., metavar="NUMERO"),
+    nombre: str = typer.Argument(..., help="Nombre nuevo"),
+) -> None:
+    """Cambia el nombre de una simulación guardada."""
+    r = _con_historial(lambda: historial.renombrar(numero_, nombre))
+    typer.echo(f"Listo: la simulación n.º {r.id} ahora se llama «{r.nombre}».")
+
+
+@historial_app.command("borrar")
+def historial_borrar_cmd(
+    numero_: int = typer.Argument(..., metavar="NUMERO"),
+    si: bool = typer.Option(False, "--si", help="Borrar sin pedir confirmación"),
+) -> None:
+    """Borra una simulación guardada."""
+    r = _con_historial(lambda: historial.obtener(numero_))
+    if not si and not _confirmar(f"¿Borrar «{r.nombre}» (n.º {r.id})?"):
+        typer.echo("No se borró nada.")
+        return
+    _con_historial(lambda: historial.borrar(numero_))
+    typer.echo(f"Se borró «{r.nombre}».")
 
 
 if __name__ == "__main__":

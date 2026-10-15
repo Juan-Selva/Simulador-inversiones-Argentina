@@ -12,6 +12,8 @@ src/simulador/
   ingesta/     descarga y caché de series (IPC de datos.gob.ar, dólares de ArgentinaDatos y DolarAPI)
   servicio.py  casos de uso: combinan ingesta y dominio; los usan la CLI y las interfaces
   formato.py   formato de pesos, porcentajes y meses en español
+  instantanea.py  foto de una simulación (parámetros, valores y texto) para guardarla
+  historial.py    historial de simulaciones guardadas en SQLite
   cli.py       interfaz de línea de comandos (Typer)
   interfaz/    interfaz gráfica (CustomTkinter): app.py dibuja, vistas.py y entradas.py son lógica testeable
 tests/         tests con pytest, sin depender de la red
@@ -65,6 +67,15 @@ simulador contado-o-cuotas --precio 120000 --cuotas 6 --tna 35 --descuento 10
 
 # Lo mismo, con una inflación mensual propia en lugar de la del INDEC
 simulador contado-o-cuotas --precio 120000 --cuotas 6 --tna 35 --descuento 10 --inflacion-mensual 3
+
+# Guardar una simulación en el historial (por defecto no se guarda nada)
+simulador comparar --capital 1000000 --tna 35 --meses 6 --guardar "Seis meses al 35"
+
+# Ver, renombrar y borrar lo guardado
+simulador historial listar
+simulador historial ver 1
+simulador historial renombrar 1 "Plazo fijo vs blue, octubre"
+simulador historial borrar 1
 ```
 
 ## Interfaz gráfica
@@ -75,7 +86,7 @@ simulador-gui
 python -m simulador.interfaz.app
 ```
 
-Tiene cinco pestañas (Comparar, Plazo fijo, Comprar dólares, Contado o cuotas, Inflación) y muestra arriba el dólar blue de hoy, con un botón para actualizarlo. Las consultas a las APIs corren en segundo plano, así que la ventana no se congela. Los números se pueden escribir como `1.000.000` o `35,5`.
+Tiene seis pestañas (Comparar, Plazo fijo, Comprar dólares, Contado o cuotas, Inflación, Historial) y muestra arriba el dólar blue de hoy, con un botón para actualizarlo. Las consultas a las APIs corren en segundo plano, así que la ventana no se congela. Los números se pueden escribir como `1.000.000` o `35,5`.
 
 Arriba a la izquierda hay un selector de tema con dos íconos, sol (modo claro) y luna (modo oscuro). La primera vez la ventana sigue el modo de tu sistema operativo; después se recuerda tu elección entre sesiones en `~/.config/simulador-inversiones/preferencias.json`.
 
@@ -127,6 +138,14 @@ La idea: pagar en cuotas te deja la plata en el bolsillo un tiempo más, y eso v
 
 Supuestos: la primera cuota se paga a los 30 días y las demás una por mes, todas de igual monto, y no se consideran comisiones ni intereses por pagar tarde el resumen de la tarjeta. La inflación del último mes es solo una referencia: la futura puede ser distinta.
 
+## Historial de simulaciones
+
+Nada se guarda solo: una simulación entra al historial únicamente si vos lo pedís y le ponés un nombre. En la CLI se usa `--guardar "nombre"` (en `comparar`, `plazo-fijo`, `comprar-dolares` y `contado-o-cuotas`); en la interfaz gráfica, el bloque «Guardar» que aparece al pie de cada resultado.
+
+Se guarda lo que había en el momento de simular: los parámetros que ingresaste, los valores y porcentajes del resultado (cotizaciones del blue, UVA, inflación, impuestos) y la fecha y hora de creación. Al abrirla de nuevo se muestra eso mismo, sin recalcular con los datos de hoy, así que sirve para ver cómo estaba el mercado cuando simulaste. Se puede renombrar y borrar.
+
+Los datos viven en una base SQLite local, en `~/.local/share/simulador-inversiones/historial.db` (en Windows, dentro de tu carpeta de usuario). No se sube a ningún lado.
+
 ## Estado y próximos pasos
 
 - [x] Plazo fijo (simple y renovado) con comparación contra inflación
@@ -137,4 +156,4 @@ Supuestos: la primera cuota se paga a los 30 días y las demás una por mes, tod
 - [x] Comprar dólares: oficial, MEP, CCL, blue, cripto y tarjeta, con impuestos
 - [x] Contado o cuotas sin interés, con descuento opcional
 - [x] Estrategia UVA / CER (plazo fijo UVA dentro de `comparar`)
-- [ ] Persistencia en SQLite
+- [x] Historial de simulaciones guardadas (SQLite), con nombre y fecha

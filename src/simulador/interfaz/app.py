@@ -19,10 +19,11 @@ except ImportError as error:  # pragma: no cover
         'Falta customtkinter. Instalalo con: pip install -e ".[gui]"'
     ) from error
 
-from simulador import preferencias, servicio
+from simulador import historial, instantanea, preferencias, servicio
 from simulador.formato import MESES
 from simulador.interfaz import vistas
 from simulador.interfaz.entradas import parsear_entero, parsear_numero, parsear_numero_opcional
+from simulador.historial import ErrorHistorial
 from simulador.servicio import ErrorSimulador
 
 # (modo claro, modo oscuro)
@@ -45,7 +46,7 @@ def _tono(tono: str) -> dict:
 
 
 def _texto_de_error(error: Exception) -> str:
-    if isinstance(error, ErrorSimulador):
+    if isinstance(error, (ErrorSimulador, ErrorHistorial)):
         return str(error)
     return f"Ocurrió un error inesperado: {error}"
 
@@ -165,8 +166,8 @@ class App(ctk.CTk):
         self._modo = preferencias.cargar_modo()
         ctk.set_appearance_mode(self._modo)
         self.title("Simulador de inversiones")
-        self.geometry("940x740")
-        self.minsize(860, 660)
+        self.geometry("980x740")
+        self.minsize(920, 660)
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
 
@@ -175,7 +176,7 @@ class App(ctk.CTk):
 
         self._tabs = ctk.CTkTabview(self)
         self._tabs.grid(row=1, column=0, padx=16, pady=(8, 16), sticky="nsew")
-        for nombre in ("Comparar", "Plazo fijo", "Comprar dólares", "Contado o cuotas", "Inflación"):
+        for nombre in ("Comparar", "Plazo fijo", "Comprar dólares", "Contado o cuotas", "Inflación", "Historial"):
             self._tabs.add(nombre)
         self._ajustar_botones_de_secciones()
         self._construir_tab_comparar()
@@ -183,6 +184,7 @@ class App(ctk.CTk):
         self._construir_tab_comprar()
         self._construir_tab_cuotas()
         self._construir_tab_inflacion()
+        self._construir_tab_historial()
         self._tabs.set("Comparar")
 
         self._actualizar_blue()
@@ -251,7 +253,7 @@ class App(ctk.CTk):
         ).grid(row=1, column=0, padx=16, pady=(6, 0), sticky="w")
         ctk.CTkLabel(
             cabecera,
-            text="Plazo fijo y dólar blue contra la inflación real del INDEC",
+            text="Plazo fijo, dólar blue y UVA contra la inflación real del INDEC",
             anchor="w",
             **_tono("suave"),
         ).grid(row=2, column=0, padx=16, pady=(0, 12), sticky="w")
@@ -329,10 +331,10 @@ class App(ctk.CTk):
             [self._cmp_boton],
             self._cmp_resultado,
             lambda: servicio.comparar_estrategias(capital, tna, meses),
-            self._mostrar_comparacion,
+            lambda c: self._mostrar_comparacion(c, capital, tna, meses),
         )
 
-    def _mostrar_comparacion(self, c) -> None:
+    def _mostrar_comparacion(self, c, capital: float, tna: float, meses: int) -> None:
         marco = self._cmp_resultado
         for linea in vistas.resumen_comparacion(c):
             _linea(marco, linea)
@@ -346,6 +348,7 @@ class App(ctk.CTk):
         if aviso:
             _linea(marco, aviso, tono="suave")
         _linea(marco, "Resultado histórico: no predice rendimientos futuros.", tono="suave")
+        self._ofrecer_guardado(marco, instantanea.de_comparacion(capital, tna, meses, c))
 
     # -- pestaña Plazo fijo
 
@@ -400,13 +403,14 @@ class App(ctk.CTk):
             [self._pf_boton],
             self._pf_resultado,
             lambda: servicio.calcular_plazo_fijo(capital, tna, meses, inflacion, renovar),
-            self._mostrar_plazo_fijo,
+            lambda sim: self._mostrar_plazo_fijo(sim, capital, tna, meses, inflacion, renovar),
         )
 
-    def _mostrar_plazo_fijo(self, sim) -> None:
+    def _mostrar_plazo_fijo(self, sim, capital: float, tna: float, meses: int, inflacion, renovar: bool) -> None:
         marco = self._pf_resultado
         _linea(marco, vistas.periodo_plazo_fijo(sim), tono="suave")
         _clave_valor(marco, vistas.filas_plazo_fijo(sim))
+        self._ofrecer_guardado(marco, instantanea.de_plazo_fijo(capital, tna, meses, inflacion, renovar, sim))
 
     # -- pestaña Comprar dólares
 
@@ -444,10 +448,10 @@ class App(ctk.CTk):
             [self._cd_boton],
             self._cd_resultado,
             lambda: servicio.comprar_dolares(pesos, comision),
-            self._mostrar_compra,
+            lambda c: self._mostrar_compra(c, comision),
         )
 
-    def _mostrar_compra(self, c) -> None:
+    def _mostrar_compra(self, c, comision: float) -> None:
         marco = self._cd_resultado
         _linea(marco, vistas.resumen_compra(c), negrita=True, tamanio=15)
         _tabla(marco, vistas.CABECERA_COMPRA, vistas.filas_compra(c))
@@ -457,6 +461,7 @@ class App(ctk.CTk):
                 _linea(marco, f"•  {texto}", tono="suave")
         for texto in vistas.pie_compra(c):
             _linea(marco, texto, tono="suave")
+        self._ofrecer_guardado(marco, instantanea.de_compra_dolares(comision, c))
 
     # -- pestaña Contado o cuotas
 
@@ -503,16 +508,17 @@ class App(ctk.CTk):
             [self._cq_boton],
             self._cq_resultado,
             lambda: servicio.comparar_contado_y_cuotas(precio, cuotas, tna, descuento, inflacion),
-            self._mostrar_cuotas,
+            lambda c: self._mostrar_cuotas(c, precio, cuotas, tna, descuento, inflacion),
         )
 
-    def _mostrar_cuotas(self, c) -> None:
+    def _mostrar_cuotas(self, c, precio: float, cuotas: int, tna: float, descuento: float, inflacion) -> None:
         marco = self._cq_resultado
         _linea(marco, vistas.veredicto_cuotas(c), negrita=True, tamanio=15)
         _clave_valor(marco, vistas.filas_cuotas(c))
         _tabla(marco, vistas.CABECERA_CUOTAS, vistas.filas_escenarios_cuotas(c))
         for nota in vistas.notas_cuotas(c):
             _linea(marco, nota, tono="suave")
+        self._ofrecer_guardado(marco, instantanea.de_contado_cuotas(precio, cuotas, tna, descuento, inflacion, c))
 
     # -- pestaña Inflación
 
@@ -592,6 +598,150 @@ class App(ctk.CTk):
 
     def _mostrar_ultimos_meses(self, datos) -> None:
         _tabla(self._inf_resultado_meses, ["Mes", "Inflación"], vistas.filas_inflacion_meses(datos))
+
+    # -- guardar una simulación en el historial
+
+    def _ofrecer_guardado(self, marco, foto: instantanea.Instantanea) -> None:
+        """Pie de cada resultado: nombre opcional y botón. Por defecto no se guarda nada."""
+        caja = ctk.CTkFrame(marco, fg_color="transparent")
+        caja.pack(fill="x", anchor="w", pady=(14, 4))
+        ctk.CTkLabel(
+            caja, text="Guardar esta simulación en el historial (opcional)", font=ctk.CTkFont(weight="bold"), anchor="w"
+        ).grid(row=0, column=0, columnspan=2, padx=8, sticky="w")
+        nombre = ctk.CTkEntry(caja, width=300, placeholder_text="Nombre, por ejemplo: Plazo fijo de marzo")
+        nombre.grid(row=1, column=0, padx=(8, 10), pady=4, sticky="w")
+        boton = ctk.CTkButton(caja, text="Guardar", width=90)
+        boton.grid(row=1, column=1, sticky="w")
+        estado = ctk.CTkLabel(caja, text="", anchor="w", wraplength=700, justify="left")
+        estado.grid(row=2, column=0, columnspan=2, padx=8, sticky="w")
+
+        def guardar() -> None:
+            try:
+                registro = historial.guardar(nombre.get(), foto)
+            except ErrorHistorial as error:
+                estado.configure(text=str(error), **_tono("negativo"))
+                return
+            estado.configure(
+                text=f"Guardada como «{registro.nombre}». La encontrás en la pestaña Historial.", **_tono("positivo")
+            )
+            boton.configure(state="disabled")
+            nombre.configure(state="disabled")
+            self._refrescar_historial()
+
+        boton.configure(command=guardar)
+
+    # -- pestaña Historial
+
+    def _construir_tab_historial(self) -> None:
+        tab = self._tabs.tab("Historial")
+        tab.grid_columnconfigure(1, weight=1)
+        tab.grid_rowconfigure(1, weight=1)
+        ctk.CTkLabel(
+            tab,
+            text=(
+                "Las simulaciones que guardaste, con los valores y porcentajes que había al momento de simular. "
+                "No se recalculan con los datos de hoy."
+            ),
+            wraplength=840,
+            justify="left",
+            anchor="w",
+            **_tono("suave"),
+        ).grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+
+        self._hi_lista = ctk.CTkScrollableFrame(tab, width=300)
+        self._hi_lista.grid(row=1, column=0, sticky="ns", padx=(0, 8))
+        self._hi_detalle = ctk.CTkScrollableFrame(tab)
+        self._hi_detalle.grid(row=1, column=1, sticky="nsew")
+        self._hi_seleccion: int | None = None
+        self._refrescar_historial()
+
+    def _refrescar_historial(self) -> None:
+        """Vuelve a leer la lista; si la simulación elegida sigue existiendo, la deja abierta."""
+        _limpiar(self._hi_lista)
+        try:
+            registros = historial.listar()
+        except ErrorHistorial as error:
+            _linea(self._hi_lista, str(error), tono="negativo")
+            return
+        if not registros:
+            self._hi_seleccion = None
+            _linea(self._hi_lista, "Todavía no guardaste ninguna simulación.", tono="suave")
+            _mensaje(
+                self._hi_detalle,
+                "Después de calcular algo, usá «Guardar» al pie del resultado para que aparezca acá.",
+                tono="suave",
+            )
+            return
+        for r in registros:
+            ctk.CTkButton(
+                self._hi_lista,
+                text=f"{r.nombre}\n{r.nombre_de_tipo} · {r.fecha_legible}",
+                anchor="w",
+                height=46,
+                command=lambda id_=r.id: self._ver_registro(id_),
+            ).pack(fill="x", pady=2)
+        if self._hi_seleccion in {r.id for r in registros}:
+            self._ver_registro(self._hi_seleccion)
+        else:
+            self._hi_seleccion = None
+            _mensaje(self._hi_detalle, "Elegí una simulación de la lista para verla.", tono="suave")
+
+    def _ver_registro(self, id_: int) -> None:
+        try:
+            r = historial.obtener(id_)
+        except ErrorHistorial as error:
+            self._hi_seleccion = None
+            _mensaje(self._hi_detalle, str(error), tono="negativo")
+            return
+        self._hi_seleccion = r.id
+        marco = self._hi_detalle
+        _limpiar(marco)
+        _linea(marco, r.nombre, negrita=True, tamanio=18)
+        _linea(marco, f"{r.nombre_de_tipo} · guardada el {r.fecha_legible}", tono="suave")
+        for linea in r.texto:
+            _linea(marco, linea)
+        _linea(marco, "Son los valores de ese momento: no se recalculan con los datos de hoy.", tono="suave")
+        self._acciones_de_registro(marco, r)
+
+    def _acciones_de_registro(self, marco, r) -> None:
+        caja = ctk.CTkFrame(marco, fg_color="transparent")
+        caja.pack(fill="x", anchor="w", pady=(14, 4))
+        nombre = ctk.CTkEntry(caja, width=260)
+        nombre.insert(0, r.nombre)
+        nombre.grid(row=0, column=0, padx=(8, 10), pady=4, sticky="w")
+        renombrar = ctk.CTkButton(caja, text="Renombrar", width=100)
+        renombrar.grid(row=0, column=1, padx=(0, 24), sticky="w")
+        borrar = ctk.CTkButton(caja, text="Borrar", width=100, fg_color=("#cf222e", "#b62324"), hover_color=("#a40e26", "#8e1519"))
+        borrar.grid(row=0, column=2, sticky="w")
+        estado = ctk.CTkLabel(caja, text="", anchor="w", wraplength=700, justify="left")
+        estado.grid(row=1, column=0, columnspan=3, padx=8, sticky="w")
+
+        def renombrar_registro() -> None:
+            try:
+                historial.renombrar(r.id, nombre.get())
+            except ErrorHistorial as error:
+                estado.configure(text=str(error), **_tono("negativo"))
+                return
+            self._refrescar_historial()
+
+        confirmando = []
+
+        def borrar_registro() -> None:
+            if not confirmando:  # primer clic: pide confirmación; el segundo borra
+                confirmando.append(True)
+                borrar.configure(text="¿Seguro? Borrar")
+                estado.configure(text="Hacé clic de nuevo en Borrar para eliminarla definitivamente.", **_tono("suave"))
+                return
+            try:
+                historial.borrar(r.id)
+            except ErrorHistorial as error:
+                estado.configure(text=str(error), **_tono("negativo"))
+                return
+            self._hi_seleccion = None
+            self._refrescar_historial()
+
+        renombrar.configure(command=renombrar_registro)
+        borrar.configure(command=borrar_registro)
 
 
 def main() -> None:
